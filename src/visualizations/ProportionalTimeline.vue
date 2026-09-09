@@ -1,6 +1,14 @@
 <template lang="pug">
 div.pt-root(ref="root")
-  div.pt-scroll(ref="scroll" :style="scrollStyle" @scroll="onScroll")
+  div.pt-scroll(
+    ref="scroll"
+    :style="scrollStyle"
+    @scroll="onScroll"
+    @wheel="onWheel"
+    @touchstart="onTouchStart"
+    @touchmove="onTouchMove"
+    @touchend="onTouchEnd"
+  )
     div.pt-inner(:style="innerStyle")
       div.pt-hour(v-for="t in ticks" :key="'h' + t.t" :style="t.labelStyle") {{ t.label }}
       div.pt-grid(v-for="t in ticks" :key="'g' + t.t" :style="t.gridStyle")
@@ -105,13 +113,32 @@ const GUTTER_PX = 22;
 const NARROW_PX = 640;
 const WIDE_PX = 980;
 
+// Zoom bounds, in pixels per hour. The floor is roughly a whole day on a phone
+// screen; the ceiling is where a minute is wide enough that zooming further just
+// wastes scroll. Pinch and ctrl-wheel both clamp to this.
+const MIN_PX_PER_HOUR = 10;
+const MAX_PX_PER_HOUR = 480;
+
+const clampZoom = (v: number) => Math.max(MIN_PX_PER_HOUR, Math.min(MAX_PX_PER_HOUR, v));
+
 export default Vue.extend({
   name: 'ProportionalTimeline',
   props: {
     tracks: { type: Array as PropType<PTTrack[]>, required: true },
     /** 'auto' picks vertical below 640px, which is where horizontal stops being readable. */
     orientation: { type: String, default: 'auto' },
+    /**
+     * Pixels per hour along the time axis. Supports `.sync`: pinch and ctrl-wheel
+     * emit `update:pxPerHour` with a clamped value so the parent's control stays
+     * in step with the gesture.
+     */
     pxPerHour: { type: Number, default: 64 },
+    /**
+     * Scale the whole window to the viewport so the time axis never scrolls.
+     * Overrides `pxPerHour`. A manual zoom gesture emits `update:fit` false so the
+     * parent can drop back to explicit zoom.
+     */
+    fit: { type: Boolean, default: false },
     /** Window shown, in minutes from midnight. */
     windowStart: { type: Number, default: 0 },
     windowEnd: { type: Number, default: 24 * 60 },
@@ -132,9 +159,29 @@ export default Vue.extend({
     },
   },
   data() {
-    return { containerWidth: 0, ro: null as ResizeObserver | null };
+    return {
+      containerWidth: 0,
+      ro: null as ResizeObserver | null,
+      // Two-finger pinch bookkeeping. Null unless a pinch is in progress.
+      pinch: null as { dist: number; px: number; client: number } | null,
+    };
   },
   computed: {
+    /**
+     * The rate actually used to lay out the day. `fit` derives it from the
+     * viewport; otherwise it is the `pxPerHour` prop, clamped so a bad value
+     * from a parent cannot wedge the layout.
+     */
+    effectivePxPerHour(): number {
+      if (this.fit) {
+        const hours = (this.windowEnd - this.windowStart) / 60 || 1;
+        const axis = this.isVertical
+          ? this.height - 16
+          : this.containerWidth - this.geom.laneOffset - 16;
+        return clampZoom(axis / hours);
+      }
+      return clampZoom(this.pxPerHour);
+    },
     isVertical(): boolean {
       if (this.orientation === 'vertical') return true;
       if (this.orientation === 'horizontal') return false;
@@ -157,7 +204,7 @@ export default Vue.extend({
      * everything downstream asks this rather than multiplying by a rate.
      */
     map(): { spans: any[]; total: number; pos: (t: number) => number } {
-      const per = this.pxPerHour / 60;
+      const per = this.effectivePxPerHour / 60;
       const spans: any[] = [];
       let p = 0;
       let cur = this.windowStart;
@@ -434,6 +481,61 @@ export default Vue.extend({
       const off = this.isVertical ? el.scrollTop : el.scrollLeft;
       const win = this.isVertical ? el.clientHeight : el.clientWidth;
       this.$emit('viewport', { start: this.invert(off), end: this.invert(off + win) });
+    },
+
+    /**
+     * Rescale so `factor` more (or less) pixels cover an hour, keeping the minute
+     * under `clientPos` (a clientX or clientY, whichever is the time axis) pinned
+     * where it is. Emits `update:pxPerHour` — the parent owns the value.
+     */
+    zoomAround(factor: number, clientPos: number) {
+      const el = this.$refs.scroll as HTMLElement;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const axisOffset = this.isVertical ? clientPos - rect.top : clientPos - rect.left;
+      const scrollBefore = this.isVertical ? el.scrollTop : el.scrollLeft;
+      const minuteAtCursor = this.invert(scrollBefore + axisOffset);
+
+      const next = clampZoom(this.effectivePxPerHour * factor);
+      if (next === this.effectivePxPerHour && !this.fit) return;
+      if (this.fit) this.$emit('update:fit', false);
+      this.$emit('update:pxPerHour', Math.round(next));
+
+      // The map recomputes once the prop lands; then put the cursor's minute back.
+      this.$nextTick(() => {
+        const target = this.map.pos(minuteAtCursor) - axisOffset;
+        if (this.isVertical) el.scrollTop = target;
+        else el.scrollLeft = target;
+      });
+    },
+    onWheel(e: WheelEvent) {
+      // Plain wheel scrolls, as on any long list. Ctrl/⌘ + wheel zooms, which is
+      // the convention maps and editors use for exactly this.
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.002);
+      this.zoomAround(factor, this.isVertical ? e.clientY : e.clientX);
+    },
+    onTouchStart(e: TouchEvent) {
+      if (e.touches.length !== 2) return;
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const axis = this.isVertical ? 'clientY' : 'clientX';
+      this.pinch = {
+        dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+        px: this.effectivePxPerHour,
+        client: (a[axis] + b[axis]) / 2,
+      };
+    },
+    onTouchMove(e: TouchEvent) {
+      if (!this.pinch || e.touches.length !== 2) return;
+      e.preventDefault(); // stop the page itself pinch-zooming
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const factor = (this.pinch.px / this.effectivePxPerHour) * (dist / this.pinch.dist);
+      this.zoomAround(factor, this.pinch.client);
+    },
+    onTouchEnd(e: TouchEvent) {
+      if (e.touches.length < 2) this.pinch = null;
     },
     /** Pixel back to minute, so a caller can draw a minimap viewport marker. */
     invert(px: number): number {

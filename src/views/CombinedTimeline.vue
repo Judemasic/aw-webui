@@ -43,6 +43,42 @@ div.combined-view
           b-badge.ml-2(v-if="d.is_own" variant="info") THIS
           span.device-uuid.ml-2 {{ d.device.slice(0, 8) }}…
 
+  //- Axis, zoom and what the drawing folds away. Collapsed by default too, so the
+  //- phone still opens straight on the timeline.
+  details.tools.mb-2
+    summary
+      b View
+      span.summary-note.ml-2 {{ viewSummary }}
+    div.tool-panel
+      div.mb-2
+        label.tool-label Time axis
+        div
+          b-form-radio-group(
+            v-model="view.axis"
+            size="sm"
+            buttons
+            button-variant="outline-secondary"
+            :options="axisOptions"
+          )
+        div.text-muted.small.mt-1 Auto goes vertical on a narrow screen, horizontal on a wide one.
+      div.mb-2
+        label.tool-label Zoom — {{ view.fit ? 'fit to screen' : view.zoom + ' px / hour' }}
+        div
+          b-button-group(size="sm")
+            b-button(
+              v-for="z in zoomPresets"
+              :key="z.value"
+              :variant="!view.fit && view.zoom === z.value ? 'primary' : 'outline-secondary'"
+              @click="setZoom(z.value)"
+            ) {{ z.text }}
+        div.text-muted.small.mt-1 Pinch, or hold Ctrl and scroll, to zoom anywhere in between.
+      div
+        label.tool-label Behaviour
+        div.checks
+          b-form-checkbox(v-model="view.collapseQuiet" size="sm") Collapse quiet time
+          b-form-checkbox(v-model="view.deviceTracks" size="sm") Device tracks
+          b-form-checkbox(v-model="view.fit" size="sm") Fit day to {{ fitAxisWord }}
+
   div.alert.alert-danger(v-if="error") {{ error }}
 
   div.summary-strip.mb-2(v-if="data")
@@ -74,8 +110,11 @@ div.combined-view
     ProportionalTimeline.flex-grow-1(
       ref="tl"
       :tracks="tracks"
-      :orientation="orientation"
-      :px-per-hour="pxPerHour"
+      :orientation="view.axis"
+      :px-per-hour.sync="view.zoom"
+      :fit.sync="view.fit"
+      :collapse-quiet="view.collapseQuiet"
+      :show-secondary="view.deviceTracks"
       :window-start="windowStart"
       :window-end="windowEnd"
       :selected-key="selectedKey"
@@ -185,6 +224,27 @@ export default Vue.extend({
       selectedKey: null as string | null,
       viewport: { start: 0, end: 24 * 60 },
       windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1024,
+      // Local, live copy of settings.combined_view. Seeded from the store once it
+      // has loaded (see mounted) and written back, debounced, on every change.
+      view: {
+        axis: 'auto' as 'auto' | 'vertical' | 'horizontal',
+        zoom: 64,
+        collapseQuiet: true,
+        deviceTracks: true,
+        fit: false,
+      },
+      viewReady: false,
+      viewSaveTimer: null as any,
+      axisOptions: [
+        { text: 'Auto', value: 'auto' },
+        { text: 'Vertical', value: 'vertical' },
+        { text: 'Horizontal', value: 'horizontal' },
+      ],
+      zoomPresets: [
+        { text: 'Day', value: 34 },
+        { text: 'Normal', value: 64 },
+        { text: 'Close', value: 128 },
+      ],
       modeOptions: [
         { text: 'Last duration', value: 'last_duration' },
         { text: 'Date range', value: 'range' },
@@ -200,7 +260,7 @@ export default Vue.extend({
     };
   },
   computed: {
-    ...mapState(useSettingsStore, ['device_names']),
+    ...mapState(useSettingsStore, ['device_names', 'combined_view']),
     dayStart(): moment.Moment {
       return moment(this.date).startOf('day');
     },
@@ -217,21 +277,22 @@ export default Vue.extend({
     windowEnd(): number {
       return 24 * 60;
     },
-    orientation(): string {
-      // Vertical at every width, deliberately -- not 'auto'.
-      //
-      // Extra width buys columns and a side detail panel here, never a different
-      // axis: one layout that scales beats two that drift, and a desktop calendar
-      // keeps its time axis vertical on a 27" monitor without anyone minding. The
-      // component still supports horizontal because roadmap 5.5b needs it for the
-      // upstream Timeline, whose desktop users do expect the horizontal axis.
-      return 'vertical';
-    },
     wideLayout(): boolean {
       return this.windowWidth >= 980;
     },
-    pxPerHour(): number {
-      return 64;
+    /** The axis the drawing resolves to right now — for the "fit to width/height" wording. */
+    resolvedVertical(): boolean {
+      if (this.view.axis === 'vertical') return true;
+      if (this.view.axis === 'horizontal') return false;
+      return this.windowWidth < 640;
+    },
+    fitAxisWord(): string {
+      return this.resolvedVertical ? 'height' : 'width';
+    },
+    viewSummary(): string {
+      const axis = this.view.axis;
+      const zoom = this.view.fit ? 'fit' : `${this.view.zoom}px`;
+      return `${axis} · ${zoom}`;
     },
     timelineHeight(): number {
       return this.windowWidth < 640 ? 520 : 500;
@@ -333,17 +394,59 @@ export default Vue.extend({
     duration() {
       this.clearSelection();
     },
+    view: {
+      deep: true,
+      handler() {
+        // Ignore the initial seed from the store; only persist real user changes.
+        if (!this.viewReady) return;
+        clearTimeout(this.viewSaveTimer);
+        this.viewSaveTimer = setTimeout(this.persistView, 500);
+      },
+    },
+    // The store can finish loading after this view mounts; re-seed once when it does.
+    combined_view: {
+      deep: true,
+      handler(v: any) {
+        if (this.viewReady || !v) return;
+        this.seedView(v);
+      },
+    },
   },
-  mounted() {
+  async mounted() {
     window.addEventListener('resize', this.onResize);
     this.reload();
+    await useSettingsStore().ensureLoaded();
+    this.seedView(this.combined_view);
   },
   beforeDestroy() {
     window.removeEventListener('resize', this.onResize);
+    clearTimeout(this.viewSaveTimer);
   },
   methods: {
     onResize() {
       this.windowWidth = window.innerWidth;
+    },
+    /** Copy the stored view prefs into the local live copy, without triggering a save. */
+    seedView(v: any) {
+      if (this.viewReady || !v) return;
+      this.view = {
+        axis: v.axis ?? 'auto',
+        zoom: v.zoom ?? 64,
+        collapseQuiet: v.collapseQuiet ?? true,
+        deviceTracks: v.deviceTracks ?? true,
+        fit: v.fit ?? false,
+      };
+      // Let the seed settle before the watcher starts persisting changes.
+      this.$nextTick(() => {
+        this.viewReady = true;
+      });
+    },
+    setZoom(px: number) {
+      this.view.fit = false;
+      this.view.zoom = px;
+    },
+    async persistView() {
+      await useSettingsStore().update({ combined_view: { ...this.view } });
     },
     clearSelection() {
       this.selected = null;
@@ -506,6 +609,12 @@ details.tools {
   opacity: 0.65;
   margin-bottom: 3px;
   display: block;
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .device-row {

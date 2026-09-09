@@ -48,6 +48,21 @@ interface State {
   // in localStorage so a rename survives a reinstall and reaches the other device.
   device_names: Record<string, string>;
 
+  // Combined-timeline view preferences. Persisted server-side (not localStorage) so
+  // the axis/zoom choice a phone makes carries over to the tablet and the desktop.
+  //   axis          'auto' | 'vertical' | 'horizontal' — 'auto' picks vertical below ~640px
+  //   zoom          pixels per hour along the time axis; also driven live by pinch / ctrl-wheel
+  //   collapseQuiet fold runs of nothing to a stub so a day is a few screens, not twenty
+  //   deviceTracks  show the raw per-device tracks beside the combined one
+  //   fit           scale the whole range to the viewport with no time-axis scroll (overrides zoom)
+  combined_view: {
+    axis: 'auto' | 'vertical' | 'horizontal';
+    zoom: number;
+    collapseQuiet: boolean;
+    deviceTracks: boolean;
+    fit: boolean;
+  };
+
   newReleaseCheckData: Record<string, any>;
   userSatisfactionPollData: {
     isEnabled: boolean;
@@ -104,6 +119,13 @@ export const useSettingsStore = defineStore('settings', {
     theme: 'auto',
     locale: 'en',
     device_names: {},
+    combined_view: {
+      axis: 'auto',
+      zoom: 64,
+      collapseQuiet: true,
+      deviceTracks: true,
+      fit: false,
+    },
 
     newReleaseCheckData: {
       isEnabled: true,
