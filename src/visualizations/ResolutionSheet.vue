@@ -248,7 +248,7 @@ export default Vue.extend({
   overflow: auto;
   padding: 14px;
   border-radius: 12px 12px 0 0;
-  background: #fff;
+  background-color: #fff;
   color: inherit;
   box-shadow: 0 -2px 18px rgba(0, 0, 0, 0.3);
 }
@@ -260,14 +260,10 @@ export default Vue.extend({
     border-radius: 12px;
   }
 }
-// The app's dark mode is a body class, not a media query, but the WebView follows
-// the system setting, so cover both rather than leave black text on white in a dark
-// app.
-@media (prefers-color-scheme: dark) {
-  .rs-sheet {
-    background: #2b2b2b;
-  }
-}
+// Dark is not a media query here: aw-webui injects `static/dark.css`, and the user
+// can force dark while the OS is light. Guessing from `prefers-color-scheme` would
+// leave black text on white for exactly that user, so the dark background for this
+// sheet lives in `dark.css` alongside every other themed surface.
 
 .rs-when {
   font-family: monospace;

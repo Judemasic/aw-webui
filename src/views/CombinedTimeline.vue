@@ -911,11 +911,28 @@ details.tools {
   padding: 12px;
   overflow: auto;
 
+  // Narrow layout: a fixed sheet over the timeline, not a block underneath it.
+  //
+  // Underneath is where it started, and on a phone that made it unreachable. The
+  // timeline is 520px tall and takes the whole viewport, and it is itself a scroll
+  // container, so every vertical drag scrolls *it* — the page never moves and nothing
+  // below the timeline can be reached. On a device that meant the Resolve… button
+  // (roadmap 4.1) existed but could not be got to. Selecting a block now raises the
+  // detail over the timeline, which is also what a phone user expects from a tap.
   &.sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1040;
     width: auto;
-    flex: 1 1 100%;
+    max-height: 60vh;
+    overflow: auto;
     border-left: 0;
     border-top: 1px solid rgba(128, 128, 128, 0.3);
+    border-radius: 12px 12px 0 0;
+    background-color: #fff;
+    box-shadow: 0 -2px 18px rgba(0, 0, 0, 0.25);
   }
   .when {
     font-family: monospace;
