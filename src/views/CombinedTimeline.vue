@@ -163,7 +163,8 @@ div.combined-view
           | event to edit. Open a device block below to edit the stored event.
         div.resolve.mt-2(v-if="selectedSegment.unresolved")
           b Resolve this overlap
-          div.small Both devices claim this time. Pick what actually counted — once, or as a standing rule. #[em (roadmap 4.1)]
+          div.small.mb-2 Both devices claim this time. Pick what actually counted — once, or as a standing rule.
+          b-button(size="sm" variant="primary" @click="openResolve") Resolve…
 
       div(v-else-if="selectedEvent")
         h5.mb-0 {{ selectedEvent.label }}
@@ -178,6 +179,20 @@ div.combined-view
           | Per-device tracks are unmodified stored truth (#[b R11]) — this is the one you can edit.
 
       b-button.mt-3(size="sm" variant="outline-secondary" @click="clearSelection") Close
+
+  //- Roadmap 4.1. Outside .timeline-body on purpose: it is a fixed-position overlay,
+  //- and nesting it in a scrolling flex child makes it inherit that child's clipping.
+  ResolutionSheet(
+    v-if="resolving"
+    :segment="resolving"
+    :participants="resolveParticipants"
+    :own-device="ownDevice"
+    :device-label="deviceLabel"
+    :format-duration="fmt"
+    :clock="clock"
+    @cancel="resolving = null"
+    @save="onResolved"
+  )
 </template>
 
 <script lang="ts">
@@ -198,6 +213,7 @@ import { useSettingsStore } from '~/stores/settings';
 import { getClient } from '~/util/awclient';
 import { getColorFromString } from '~/util/color';
 import ProportionalTimeline from '~/visualizations/ProportionalTimeline.vue';
+import ResolutionSheet from '~/visualizations/ResolutionSheet.vue';
 
 interface Slice {
   device: string;
@@ -229,7 +245,7 @@ interface DeviceTrack {
 
 export default Vue.extend({
   name: 'CombinedTimeline',
-  components: { ProportionalTimeline },
+  components: { ProportionalTimeline, ResolutionSheet },
   data() {
     return {
       date: moment().format('YYYY-MM-DD'),
@@ -240,6 +256,8 @@ export default Vue.extend({
       enabled: {} as Record<string, boolean>,
       selected: null as any,
       selectedKey: null as string | null,
+      /** The segment the resolution sheet is open on, or null. Roadmap 4.1. */
+      resolving: null as Segment | null,
       viewport: { start: 0, end: 24 * 60 },
       windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1024,
       // Local, live copy of settings.combined_view. Seeded from the store once it
@@ -318,6 +336,43 @@ export default Vue.extend({
     segments(): Segment[] {
       if (!this.data) return [];
       return (this.data.combined as Segment[]).filter(s => this.enabled[s.device] !== false);
+    },
+    /** This device's uuid — a decision's `created_by`. Empty until the fetch lands. */
+    ownDevice(): string {
+      const own = this.devices.find(d => d.is_own);
+      return own ? own.device : '';
+    },
+    /**
+     * The competitors in the segment the sheet is open on.
+     *
+     * Every participant gets the *segment's* duration, not a shorter one: a contention
+     * segment is by construction a window in which the whole set was active, so any
+     * per-participant number would be the same number. `04` §4.2's mockup shows two
+     * different figures, but that mockup predates segmentation.
+     */
+    resolveParticipants(): any[] {
+      if (!this.resolving) return [];
+      const minutes = this.resolving.seconds / 60;
+      // Deduplicated on (device, label). A heartbeat-split event puts the same
+      // device/app into `background` twice, which in the detail list is harmless
+      // repetition but in the sheet would be two identical radio options — an
+      // unanswerable question — and would write the same app into
+      // `deliberate_background` twice.
+      const seen = new Set<string>();
+      const out: any[] = [];
+      for (const sl of this.slicesOf(this.resolving) as any[]) {
+        const k = `${sl.device}|${sl.label}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push({
+          device: sl.device,
+          label: sl.label,
+          minutes,
+          color: this.colorFor(sl.label),
+          isForeground: sl.isForeground,
+        });
+      }
+      return out;
     },
     devices(): DeviceTrack[] {
       return this.data ? (this.data.devices as DeviceTrack[]) : [];
@@ -416,11 +471,16 @@ export default Vue.extend({
           id: d.device,
           label: this.deviceLabel(d.device),
           short: this.shortName(d),
-          rows: d.events.map(e => ({
+          rows: d.events.map((e, i) => ({
             start: this.toMinutes(e.start),
             end: this.toMinutes(e.end),
             title: `${e.label} · ${this.deviceLabel(d.device)} · ${this.fmt(e.seconds / 60)}`,
-            key: `${d.device}:${e.start}`,
+            // Index included because a start time is **not** unique within a device
+            // track: a heartbeat split leaves two events on the same timestamp, which
+            // Vue reported as a duplicate key and which would have made the block
+            // stepper's key lookup land on the wrong one of the pair. Ordering from
+            // the endpoint is deterministic, so this still survives a re-fetch.
+            key: `${d.device}:${e.start}:${i}`,
             ref: { kind: 'event', device: d.device, ...e },
             bands: [{ label: e.label, color: this.colorFor(e.label), primary: true }],
           })),
@@ -571,7 +631,18 @@ export default Vue.extend({
       if (named) return named;
       const d = this.devices.find(x => x.device === uuid);
       if (d && d.hostname) return d.hostname;
-      return uuid;
+      // Neither renamed nor carrying a hostname — events imported before 3.1's origin
+      // tagging land here. Returning the raw uuid was the 3.4 defect this view exists
+      // to fix, and a 36-character string is unreadable in a sheet whose whole
+      // question is *which device*. A short form is still unique in practice, and the
+      // rename control is one fold-out away when it is not.
+      if (d && d.is_own) return 'This device';
+      // Separators stripped first: a uuid's first four characters can include a dash,
+      // and "Device AAA-" reads like a truncation bug rather than a name.
+      return `Device ${uuid
+        .replace(/[^a-z0-9]/gi, '')
+        .slice(0, 4)
+        .toUpperCase()}`;
     },
     displayName(d: DeviceTrack): string {
       return this.deviceLabel(d.device);
@@ -608,11 +679,7 @@ export default Vue.extend({
       if (!rows.length) return;
       const i = this.stepIndex;
       const next =
-        i < 0
-          ? dir > 0
-            ? 0
-            : rows.length - 1
-          : Math.min(rows.length - 1, Math.max(0, i + dir));
+        i < 0 ? (dir > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, i + dir));
       const row = rows[next];
       this.selected = row.ref;
       this.selectedKey = row.key;
@@ -633,6 +700,20 @@ export default Vue.extend({
         return;
       e.preventDefault();
       this.step(e.key === 'ArrowRight' ? 1 : -1);
+    },
+
+    openResolve() {
+      this.resolving = this.selectedSegment;
+    },
+    /**
+     * Roadmap 4.1 stops here on purpose. The sheet has built a complete decision
+     * record; **4.2** is the step that appends it to `decisions.jsonl` and recomputes
+     * the day. Logging it keeps the record inspectable in the meantime, and means the
+     * format is exercised before anything depends on it being right.
+     */
+    onResolved(decision: any) {
+      // eslint-disable-next-line no-console
+      console.log('[combined] decision built (roadmap 4.1; 4.2 persists it):', decision);
     },
 
     onSelect(ref: any, key: string) {
