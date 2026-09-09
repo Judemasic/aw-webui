@@ -42,6 +42,12 @@ interface State {
   theme: 'light' | 'dark' | 'auto';
   locale: string;
 
+  // Friendly names for devices seen in the combined timeline, keyed by device uuid.
+  // Without these a peer shows as a raw uuid, which is unreadable and, at phone
+  // width, long enough to collide with the text beside it. Lives here rather than
+  // in localStorage so a rename survives a reinstall and reaches the other device.
+  device_names: Record<string, string>;
+
   newReleaseCheckData: Record<string, any>;
   userSatisfactionPollData: {
     isEnabled: boolean;
@@ -97,6 +103,7 @@ export const useSettingsStore = defineStore('settings', {
 
     theme: 'auto',
     locale: 'en',
+    device_names: {},
 
     newReleaseCheckData: {
       isEnabled: true,

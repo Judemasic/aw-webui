@@ -38,13 +38,21 @@ div(:class="{'fixed-top-padding': fixedTopMenu}")
             icon(name="stream")
             | {{ $t('nav.timeline') }}
 
+        b-nav-item(to="/combined")
+          div.px-2.px-lg-1
+            icon(name="layer-group")
+            | {{ $t('nav.combined') }}
+
         b-nav-item(to="/stopwatch")
           div.px-2.px-lg-1
             icon(name="stopwatch")
             | {{ $t('nav.stopwatch') }}
 
       // Brand on large screens (centered)
-      b-navbar-nav.abs-center.d-none.d-lg-block
+      // xl, not lg: the brand is absolutely centred, so it collides with the left
+      // nav once that has enough items. Adding "Combined" crossed that line at
+      // ~1180px, which is an ordinary laptop width.
+      b-navbar-nav.abs-center.d-none.d-xl-block
         b-navbar-brand(to="/" style="background-color: transparent;")
           img.ml-0.aligh-middle(src="/logo.png" style="height: 1.5em;")
           span.ml-2.align-middle(style="font-size: 1.0em; color: #000;") {{ $t('app.name') }}
@@ -117,6 +125,7 @@ import 'vue-awesome/icons/chart-line';
 import 'vue-awesome/icons/chart-pie';
 import 'vue-awesome/icons/flag-checkered';
 import 'vue-awesome/icons/stopwatch';
+import 'vue-awesome/icons/layer-group';
 import 'vue-awesome/icons/robot';
 import 'vue-awesome/icons/cog';
 import 'vue-awesome/icons/tools';

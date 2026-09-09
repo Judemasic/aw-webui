@@ -9,6 +9,7 @@ export default {
     noActivityReports:
       'No activity reports available. Make sure you have both an AFK and window watcher running.',
     timeline: 'Timeline',
+    combined: 'Combined',
     stopwatch: 'Stopwatch',
     tools: 'Tools',
     search: 'Search',

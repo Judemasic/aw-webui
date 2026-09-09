@@ -11,6 +11,7 @@ const Buckets = () => import('./views/Buckets.vue');
 const Bucket = () => import('./views/Bucket.vue');
 const QueryExplorer = () => import('./views/QueryExplorer.vue');
 const Timeline = () => import('./views/Timeline.vue');
+const CombinedTimeline = () => import('./views/CombinedTimeline.vue');
 const Trends = () => import('./views/Trends.vue');
 const Settings = () => import('./views/settings/Settings.vue');
 // CategoryBuilder is no longer a top-level route — it's embedded inside
@@ -63,6 +64,7 @@ const router = new VueRouter({
     { path: '/buckets', component: Buckets },
     { path: '/buckets/:id', component: Bucket, props: true },
     { path: '/timeline', component: Timeline, meta: { fullContainer: true } },
+    { path: '/combined', component: CombinedTimeline, meta: { fullContainer: true } },
     { path: '/trends', component: Trends, meta: { fullContainer: true } },
     { path: '/trends/:host', component: Trends, meta: { fullContainer: true } },
     { path: '/report', component: Report },
