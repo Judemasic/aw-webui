@@ -106,6 +106,24 @@ div.combined-view
       )
       div.mm-view(:style="viewportStyle")
 
+  //- Block stepper. Tapping a block is fine when it is big; at a whole-day zoom most
+  //- blocks are a couple of pixels wide and cannot be hit with a thumb, so give the
+  //- selection a keyboard/thumb path that does not depend on the block's size.
+  div.stepper.mb-1(v-if="data && stepRows.length")
+    b-button-group(size="sm")
+      b-button(
+        :disabled="stepIndex === 0"
+        title="Previous block (←)"
+        @click="step(-1)"
+      ) ‹ Prev
+      b-button(
+        :disabled="stepIndex >= 0 && stepIndex === stepRows.length - 1"
+        title="Next block (→)"
+        @click="step(1)"
+      ) Next ›
+    span.step-count.ml-2 {{ stepIndex >= 0 ? stepIndex + 1 : '–' }} / {{ stepRows.length }}
+    span.step-track.ml-2 {{ activeTrack ? activeTrack.label : '' }}
+
   div.d-flex.timeline-body(v-if="data")
     ProportionalTimeline.flex-grow-1(
       ref="tl"
@@ -335,6 +353,37 @@ export default Vue.extend({
     },
 
     /** The generic shape ProportionalTimeline draws. Combined first — it gets the width. */
+    /**
+     * The track the stepper walks. Whichever track the selection is in, so stepping
+     * from a device block stays on that device rather than jumping to Combined;
+     * with nothing selected it is the combined track, which is what a first tap on
+     * Next should give you.
+     */
+    activeTrack(): any {
+      const ts = this.tracks;
+      if (this.selectedKey) {
+        const found = ts.find((t: any) => t.rows.some((r: any) => r.key === this.selectedKey));
+        if (found) return found;
+      }
+      return ts[0] || null;
+    },
+    /**
+     * The steppable blocks, in time order, restricted to the window the renderer is
+     * actually drawing — stepping to a block outside it would select something with
+     * nothing on screen to show for it.
+     */
+    stepRows(): any[] {
+      if (!this.activeTrack) return [];
+      return this.activeTrack.rows
+        .filter((r: any) => r.end > this.windowStart && r.start < this.windowEnd)
+        .slice()
+        .sort((a: any, b: any) => a.start - b.start);
+    },
+    /** Index of the selection within [stepRows], or -1 when nothing is selected. */
+    stepIndex(): number {
+      if (!this.selectedKey) return -1;
+      return this.stepRows.findIndex((r: any) => r.key === this.selectedKey);
+    },
     tracks(): any[] {
       const out: any[] = [
         {
@@ -414,12 +463,14 @@ export default Vue.extend({
   },
   async mounted() {
     window.addEventListener('resize', this.onResize);
+    window.addEventListener('keydown', this.onKeydown);
     this.reload();
     await useSettingsStore().ensureLoaded();
     this.seedView(this.combined_view);
   },
   beforeDestroy() {
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('keydown', this.onKeydown);
     clearTimeout(this.viewSaveTimer);
   },
   methods: {
@@ -544,6 +595,44 @@ export default Vue.extend({
       if (trimmed) names[d.device] = trimmed;
       else delete names[d.device];
       await settings.update({ device_names: names });
+    },
+
+    /**
+     * Move the selection `dir` blocks along the active track and scroll it into view.
+     *
+     * From no selection this lands on the first block (or the last, going back), so
+     * the buttons are useful before anything has been tapped.
+     */
+    step(dir: number) {
+      const rows = this.stepRows;
+      if (!rows.length) return;
+      const i = this.stepIndex;
+      const next =
+        i < 0
+          ? dir > 0
+            ? 0
+            : rows.length - 1
+          : Math.min(rows.length - 1, Math.max(0, i + dir));
+      const row = rows[next];
+      this.selected = row.ref;
+      this.selectedKey = row.key;
+      this.$nextTick(() => {
+        const tl: any = this.$refs.tl;
+        if (tl && tl.revealRange) tl.revealRange(row.start, row.end);
+      });
+    },
+    /**
+     * ← / → step too. Skipped while a form control has focus, so typing in the
+     * device-rename box does not move the selection out from under you.
+     */
+    onKeydown(e: KeyboardEvent) {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const el = e.target as HTMLElement | null;
+      const tag = el && el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable))
+        return;
+      e.preventDefault();
+      this.step(e.key === 'ArrowRight' ? 1 : -1);
     },
 
     onSelect(ref: any, key: string) {
@@ -673,6 +762,27 @@ details.tools {
       opacity: 0.65;
     }
   }
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  // Right-aligned so it sits over the timeline's own scroll area rather than the
+  // hour-label gutter, and stays under the thumb on a phone held one-handed.
+  justify-content: flex-end;
+}
+.step-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  color: var(--secondary, #6c757d);
+}
+.step-track {
+  font-size: 0.8rem;
+  color: var(--secondary, #6c757d);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .minimap {

@@ -545,6 +545,25 @@ export default Vue.extend({
       }
       return this.windowEnd;
     },
+    /**
+     * Scroll so the `[start, end]` minute range sits in the middle of the viewport.
+     *
+     * The parent's block stepper calls this. Without it, stepping is useless as soon
+     * as the timeline is zoomed in far enough to be worth stepping through: the
+     * selection would move to a block that is off-screen, and the only feedback would
+     * be the detail panel changing.
+     */
+    revealRange(start: number, end: number) {
+      const el = this.$refs.scroll as HTMLElement;
+      if (!el) return;
+      const lane = this.isVertical ? 0 : this.geom.laneOffset;
+      const a = this.map.pos(start) + lane;
+      const b = this.map.pos(end) + lane;
+      const win = this.isVertical ? el.clientHeight : el.clientWidth;
+      const target = Math.max(0, (a + b) / 2 - win / 2);
+      if (this.isVertical) el.scrollTo({ top: target, behavior: 'smooth' });
+      else el.scrollTo({ left: target, behavior: 'smooth' });
+    },
     /** Scroll so `minute` is near the top/left. Used by the minimap. */
     scrollToMinute(minute: number) {
       const el = this.$refs.scroll as HTMLElement;
