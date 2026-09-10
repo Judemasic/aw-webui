@@ -8,21 +8,26 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
         b-button(@click="goToday") {{ dateLabel }}
         b-button(:disabled="isToday" @click="shiftDay(1)" title="Next day") ›
       b-button.gear(
-        v-if="compact"
         size="sm"
         :variant="toolsOpen ? 'primary' : 'outline-secondary'"
         title="Range, devices and view"
         @click="toolsOpen = !toolsOpen"
       ) ⚙
 
-  //- Compact: both fold-outs move into the ⚙ sheet, so the phone opens on the data
-  //- with no fold-outs in the way at all. Wide: they stay where they were.
-  div.tools-wrap(:class="{ 'tools-sheet': compact, open: toolsOpen }")
+  //- Both fold-outs live behind the ⚙ at every width. On a phone the panel is a
+  //- sheet over the data; on a desktop it opens in the flow where the fold-outs used
+  //- to sit permanently. Same control, same panel, two presentations.
+  //-
+  //- Wide screens kept the two collapsed `<details>` summaries because there was room
+  //- for them -- but room is not a reason. They cost 72px above the data on every
+  //- visit to buy a control used once a session, and having the phone answer the
+  //- question one way and the desktop another means two things to learn, not one.
+  div.tools-wrap(v-if="compact || toolsOpen" :class="{ 'tools-sheet': compact, open: toolsOpen }")
     div.sheet-head.compact-only(v-if="compact")
       b Range, devices & view
       b-button.ml-auto(size="sm" variant="outline-secondary" @click="toolsOpen = false") Done
     //- Range + devices, folded away by default so the phone opens on the data.
-    details.tools.mb-2(ref="tools" :open="compact")
+    details.tools.mb-2(ref="tools" open)
       summary
         b Range &amp; devices
         span.summary-note.ml-2 {{ toolSummary }}
@@ -58,7 +63,7 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
 
     //- Axis, zoom and what the drawing folds away. Collapsed by default too, so the
     //- phone still opens straight on the timeline.
-    details.tools.mb-2(:open="compact")
+    details.tools.mb-2(open)
       summary
         b View
         span.summary-note.ml-2 {{ viewSummary }}
@@ -243,7 +248,10 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
           div.resolve.mt-2(v-if="selectedSegment.unresolved && !compact")
             b Resolve this overlap
             div.small.mb-2 Both devices claim this time. Pick what actually counted — once, or as a standing rule.
-            b-button(size="sm" variant="primary" @click="openResolve") Resolve…
+            //- Not "Resolve…" here either. The convention is real, but the owner
+            //- read the ellipsis as a cut-off word once already, and a convention
+            //- that has to be explained to the person using it has lost.
+            b-button(size="sm" variant="primary" @click="openResolve") Resolve overlap
 
       div(v-else-if="selectedEvent")
         div.d-flex.align-items-start
@@ -1056,11 +1064,24 @@ export default Vue.extend({
     flex: 1 1 auto;
     min-height: 0;
   }
-  .gear {
-    line-height: 1;
-    padding: 0.25rem 0.5rem;
-    font-size: 1rem;
-  }
+}
+
+// The ⚙ itself is not compact-only: it is the entrance to the two panels at every
+// width now, so it is styled once, outside the compact block.
+.gear {
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+  font-size: 1rem;
+}
+
+// Wide: the panel opens in the flow, where the fold-outs used to live permanently,
+// and marks itself as a thing that was opened rather than part of the page.
+.combined-view:not(.compact) .tools-wrap {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 6px;
+  background: rgba(128, 128, 128, 0.05);
 }
 
 // The ⚙ sheet. Same two panels, moved off the screen's critical path — they are

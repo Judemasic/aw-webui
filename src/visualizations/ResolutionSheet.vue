@@ -42,11 +42,23 @@ div.rs-backdrop(@click.self="$emit('cancel')")
           span.rs-opt-t Neither — I was away
           span.rs-opt-s this time counts as nothing
 
-      //- `concurrent` is not a fifth radio: R6 says exactly one activity counts, so
-      //- "I was doing both" is a note about the loser, not a different winner.
-      section.rs-both(v-if="hasWinner")
-        b-form-checkbox(v-model="both" size="sm")
-          | I really was doing both — the other one was deliberate, not noise
+      //- Checkboxes, and one per other activity.
+      //-
+      //- These are not radios because R6 says exactly one activity counts: this is a
+      //- note about the ones that lost, not a second winner. But it shipped as a
+      //- single "I really was doing both" tick, which is wrong as soon as three
+      //- devices are in play -- there is no "both" then, and the tick silently
+      //- marked *every* loser deliberate. Now the owner ticks the ones that were.
+      section.rs-both(v-if="hasWinner && others.length")
+        label.rs-both-label.mb-1 Also deliberate — tick anything else you meant to be running
+        label.rs-chk(v-for="o in others" :key="'d' + o.i" :class="{ on: !!deliberate[o.i] }")
+          input(type="checkbox" :checked="!!deliberate[o.i]" @change="toggleDeliberate(o.i)")
+          span.rs-sw.rs-opt-sw(:style="{ background: o.p.color }")
+          span.rs-opt-t {{ o.p.label }}
+          //- The device, not a repeated hint: two devices can be running the same
+          //- app, and then the label alone names both rows identically.
+          span.rs-opt-s {{ deviceLabel(o.p.device) }}
+          span.rs-opt-d {{ formatDuration(o.p.minutes) }}
 
       section.rs-scope
         label.rs-scope-label.mb-1 Apply to
@@ -116,7 +128,9 @@ export default Vue.extend({
     return {
       pick: null as string | null,
       customLabel: '',
-      both: false,
+      // index into `participants` -> was it deliberate. Keyed by index rather than
+      // held as a list so a changed winner needs no cleanup: `others` drops it.
+      deliberate: {} as Record<number, boolean>,
       scope: 'once' as 'once' | 'always',
       pending: null as any,
     };
@@ -131,6 +145,12 @@ export default Vue.extend({
     },
     hasWinner(): boolean {
       return this.pickedIndex >= 0 || this.pick === 'relabel';
+    },
+    /** Every participant that is not the winner, with its index kept. */
+    others(): { p: any; i: number }[] {
+      return this.participants
+        .map((p: any, i: number) => ({ p, i }))
+        .filter(o => o.i !== this.pickedIndex);
     },
     clashSummary(): string {
       return this.participants.map(p => `${this.deviceLabel(p.device)}: ${p.label}`).join(' and ');
@@ -156,6 +176,10 @@ export default Vue.extend({
     window.removeEventListener('keydown', this.onKeydown, true);
   },
   methods: {
+    toggleDeliberate(i: number) {
+      // $set, not assignment: Vue 2 cannot see a key added to a plain object.
+      this.$set(this.deliberate, i, !this.deliberate[i]);
+    },
     onKeydown(e: KeyboardEvent) {
       if (e.key === 'Escape') this.$emit('cancel');
       // The combined view binds ← / → to its block stepper. While the sheet is open
@@ -184,12 +208,11 @@ export default Vue.extend({
       if (this.pick === 'ignore') {
         return { outcome: 'ignore', foreground: null, label: null, deliberate_background: [] };
       }
-      // Everything the winner did not claim. `concurrent` is this list being
-      // non-empty and deliberate; `foreground` is the same record with it empty.
-      const losers = this.participants
-        .filter((_: any, i: number) => i !== this.pickedIndex)
-        .map((p: any) => p.label);
-      const deliberate = this.both ? losers : [];
+      // The losers the owner ticked. `concurrent` is this list being non-empty;
+      // `foreground` is the same record with it empty.
+      const deliberate = this.others
+        .filter((o: any) => this.deliberate[o.i])
+        .map((o: any) => o.p.label);
       if (this.pick === 'relabel') {
         return {
           outcome: 'relabel',
@@ -321,7 +344,8 @@ export default Vue.extend({
 }
 
 .rs-opt,
-.rs-scope-o {
+.rs-scope-o,
+.rs-chk {
   display: flex;
   align-items: baseline;
   // 44px so every option clears a thumb (R34). The whole row is the target, not the
@@ -408,7 +432,8 @@ export default Vue.extend({
   border-radius: 4px;
   background: rgba(128, 128, 128, 0.12);
 }
-.rs-scope-label {
+.rs-scope-label,
+.rs-both-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
