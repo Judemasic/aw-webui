@@ -10,10 +10,10 @@ div
       div.flex-grow-1
         div.ds-title {{ s.title }}
         div.ds-help.text-muted.small {{ s.help }}
-      b-button.ds-open(variant="outline-primary" @click="open(s.id)") Open
+      b-button.ds-open(variant="outline-primary" @click="open(s.id)") {{ s.action || 'Open' }}
 
     p.text-muted.small.mt-3.mb-0
-      | Each opens the app's own screen. Use the system back gesture to come back here.
+      | These open the app's own screens. Use the system back gesture to come back here.
 </template>
 
 <script lang="ts">
@@ -35,6 +35,8 @@ interface NativeScreen {
   id: string;
   title: string;
   help: string;
+  /** Button text, when "Open" is not the right word. */
+  action?: string;
 }
 
 export default Vue.extend({
@@ -51,6 +53,12 @@ export default Vue.extend({
           id: 'auth',
           title: 'API Authentication',
           help: "This device's API key, for reaching its server from elsewhere.",
+        },
+        {
+          id: 'browser',
+          title: 'Open in browser',
+          help: 'Opens this dashboard in your browser, already signed in.',
+          action: 'Open',
         },
       ] as NativeScreen[],
     };
