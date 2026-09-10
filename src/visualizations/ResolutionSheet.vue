@@ -5,65 +5,69 @@ div.rs-backdrop(@click.self="$emit('cancel')")
       h5.mb-0 What were you doing?
       p.rs-when.mb-0 {{ range }} · {{ formatDuration(segment.seconds / 60) }}
 
-    //- The competing activities, side by side (R9). This is the evidence; the
-    //- choices below are the question.
-    section.rs-part
-      div.rs-p(v-for="(p, i) in participants" :key="i")
-        span.rs-sw(:style="{ background: p.color }")
-        div.flex-grow-1
-          div.rs-p-app {{ p.label }}
-          div.rs-p-dev {{ deviceLabel(p.device) }}
-        span.rs-p-dur {{ formatDuration(p.minutes) }}
+    //- Only this middle band scrolls; the head and the foot stay put.
+    div.rs-body
+      //- The competing activities, side by side (R9). This is the evidence; the
+      //- choices below are the question.
+      section.rs-part
+        div.rs-p(v-for="(p, i) in participants" :key="i")
+          span.rs-sw(:style="{ background: p.color }")
+          div.flex-grow-1
+            div.rs-p-app {{ p.label }}
+            div.rs-p-dev {{ deviceLabel(p.device) }}
+          span.rs-p-dur {{ formatDuration(p.minutes) }}
 
-    section.rs-opts
-      label.rs-opt(v-for="(p, i) in participants" :key="'p' + i" :class="{ on: pick === 'p' + i }")
-        input(type="radio" :value="'p' + i" v-model="pick")
-        span.rs-opt-t {{ p.label }}
-        span.rs-opt-s {{ deviceLabel(p.device) }}
+      section.rs-opts
+        label.rs-opt(v-for="(p, i) in participants" :key="'p' + i" :class="{ on: pick === 'p' + i }")
+          input(type="radio" :value="'p' + i" v-model="pick")
+          span.rs-sw.rs-opt-sw(:style="{ background: p.color }")
+          span.rs-opt-t {{ p.label }}
+          span.rs-opt-s {{ deviceLabel(p.device) }}
+          span.rs-opt-d {{ formatDuration(p.minutes) }}
 
-      label.rs-opt(:class="{ on: pick === 'relabel' }")
-        input(type="radio" value="relabel" v-model="pick")
-        span.rs-opt-t Something else…
-        span.rs-opt-s neither of these is right
-      b-form-input.rs-label-in(
-        v-if="pick === 'relabel'"
-        v-model="customLabel"
-        size="sm"
-        placeholder="e.g. reading with music on"
-        @keydown.enter.native.prevent="onSave"
-      )
+        label.rs-opt(:class="{ on: pick === 'relabel' }")
+          input(type="radio" value="relabel" v-model="pick")
+          span.rs-opt-t Something else…
+          span.rs-opt-s neither of these is right
+        b-form-input.rs-label-in(
+          v-if="pick === 'relabel'"
+          v-model="customLabel"
+          size="sm"
+          placeholder="e.g. reading with music on"
+          @keydown.enter.native.prevent="onSave"
+        )
 
-      label.rs-opt(:class="{ on: pick === 'ignore' }")
-        input(type="radio" value="ignore" v-model="pick")
-        span.rs-opt-t Neither — I was away
-        span.rs-opt-s this time counts as nothing
+        label.rs-opt(:class="{ on: pick === 'ignore' }")
+          input(type="radio" value="ignore" v-model="pick")
+          span.rs-opt-t Neither — I was away
+          span.rs-opt-s this time counts as nothing
 
-    //- `concurrent` is not a fifth radio: R6 says exactly one activity counts, so
-    //- "I was doing both" is a note about the loser, not a different winner.
-    section.rs-both(v-if="hasWinner")
-      b-form-checkbox(v-model="both" size="sm")
-        | I really was doing both — the other one was deliberate, not noise
+      //- `concurrent` is not a fifth radio: R6 says exactly one activity counts, so
+      //- "I was doing both" is a note about the loser, not a different winner.
+      section.rs-both(v-if="hasWinner")
+        b-form-checkbox(v-model="both" size="sm")
+          | I really was doing both — the other one was deliberate, not noise
 
-    section.rs-scope
-      label.rs-scope-label.mb-1 Apply to
-      div.d-flex
-        label.rs-scope-o(:class="{ on: scope === 'once' }")
-          input(type="radio" value="once" v-model="scope")
-          span.rs-opt-t Just this
-          span.rs-opt-s {{ range }} only
-        label.rs-scope-o(:class="{ on: scope === 'always' }")
-          input(type="radio" value="always" v-model="scope")
-          span.rs-opt-t Always
-          //- Short on purpose. The signature can name three or four device/app pairs,
-          //- which inside a half-width button wraps to five lines and makes the two
-          //- scope choices different heights. It goes in the note below instead,
-          //- where it has the full width and only appears once it is relevant.
-          span.rs-opt-s whenever these clash
+      section.rs-scope
+        label.rs-scope-label.mb-1 Apply to
+        div.d-flex
+          label.rs-scope-o(:class="{ on: scope === 'once' }")
+            input(type="radio" value="once" v-model="scope")
+            span.rs-opt-t Just this
+            span.rs-opt-s {{ range }} only
+          label.rs-scope-o(:class="{ on: scope === 'always' }")
+            input(type="radio" value="always" v-model="scope")
+            span.rs-opt-t Always
+            //- Short on purpose. The signature can name three or four device/app pairs,
+            //- which inside a half-width button wraps to five lines and makes the two
+            //- scope choices different heights. It goes in the note below instead,
+            //- where it has the full width and only appears once it is relevant.
+            span.rs-opt-s whenever these clash
 
-    p.rs-note.mb-2(v-if="scope === 'always'")
-      | Whenever #[b {{ clashSummary }}] clash. This becomes a standing rule — it stays
-      | listed and can be undone on its own, and a window it resolves is marked as
-      | auto-resolved.
+      p.rs-note.mb-2(v-if="scope === 'always'")
+        | Whenever #[b {{ clashSummary }}] clash. This becomes a standing rule — it stays
+        | listed and can be undone on its own, and a window it resolves is marked as
+        | auto-resolved.
 
     footer.rs-foot
       //- Roadmap 4.1 builds the decision; 4.2 is what writes it to decisions.jsonl.
@@ -72,9 +76,9 @@ div.rs-backdrop(@click.self="$emit('cancel')")
         b Not written yet.
         |  Roadmap 4.2 persists decisions; this is the record it will append:
         pre.rs-json {{ pendingJson }}
-      div.d-flex.justify-content-end
-        b-button.mr-2(size="sm" variant="outline-secondary" @click="$emit('cancel')") Cancel
-        b-button(size="sm" variant="primary" :disabled="!canSave" @click="onSave") Save
+      div.d-flex.justify-content-end.rs-btns
+        b-button.mr-2(variant="outline-secondary" @click="$emit('cancel')") Cancel
+        b-button(variant="primary" :disabled="!canSave" @click="onSave") Save
 </template>
 
 <script lang="ts">
@@ -245,7 +249,12 @@ export default Vue.extend({
   width: 100%;
   max-width: 460px;
   max-height: 92vh;
-  overflow: auto;
+  // Roadmap 4.1b criterion 5 — ten decisions in a row. The head says which stretch
+  // of time this is and the foot holds Save; both stay put while the middle scrolls,
+  // so the answer never has to be hunted for below the fold.
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 14px;
   border-radius: 12px 12px 0 0;
   background-color: #fff;
@@ -271,9 +280,15 @@ export default Vue.extend({
   opacity: 0.7;
 }
 .rs-head {
+  flex: 0 0 auto;
   border-bottom: 1px solid rgba(128, 128, 128, 0.3);
   padding-bottom: 8px;
   margin-bottom: 8px;
+}
+.rs-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .rs-part {
@@ -353,8 +368,33 @@ export default Vue.extend({
   opacity: 0.7;
 }
 .rs-foot {
+  flex: 0 0 auto;
   border-top: 1px solid rgba(128, 128, 128, 0.3);
   padding-top: 8px;
+}
+.rs-opt-sw {
+  height: 16px;
+  margin-right: 6px;
+}
+.rs-opt-d {
+  margin-left: auto;
+  font-family: monospace;
+  font-size: 11.5px;
+  opacity: 0.75;
+}
+
+// Phone only. The evidence list and the options showed the same five rows twice,
+// which on a 412px screen is most of the sheet; the options carry the swatch and
+// the duration now, so the list above them is redundant here. Wider screens keep
+// it -- there is room, and R35 says not to change what already works.
+@media (max-width: 575.98px) {
+  .rs-part {
+    display: none;
+  }
+  .rs-btns .btn {
+    min-height: 44px;
+    min-width: 96px;
+  }
 }
 .rs-pending {
   font-size: 11px;

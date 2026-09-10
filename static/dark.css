@@ -475,10 +475,12 @@ label.btn-outline-danger {
   border-color: #e9ebf0 !important;
 }
 
-/* Combined view (roadmap 3.5 / 4.1): two surfaces that float over the page and so
-   need their own background rather than the body's. */
+/* Combined view (roadmap 3.5 / 4.1 / 4.1b): the surfaces that float over the page
+   and so need their own background rather than the body's. */
 .detail.sheet,
-.rs-sheet {
+.rs-sheet,
+.tools-sheet,
+.stepper.compact {
   background-color: #1a1d24 !important;
   border-color: #282c32 !important;
 }

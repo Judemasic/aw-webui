@@ -1,87 +1,101 @@
 <template lang="pug">
-div.combined-view
-  div.d-flex.align-items-center.flex-wrap.mb-2
+div.combined-view(:class="{ compact }" :style="rootStyle")
+  div.d-flex.align-items-center.flex-wrap.hdr.mb-2
     h3.mb-0.mr-auto Combined
     div.d-flex.align-items-center
-      b-button-group.mr-2(size="sm")
+      b-button-group.mr-1(size="sm")
         b-button(@click="shiftDay(-1)" title="Previous day") ‹
         b-button(@click="goToday") {{ dateLabel }}
         b-button(:disabled="isToday" @click="shiftDay(1)" title="Next day") ›
+      b-button.gear(
+        v-if="compact"
+        size="sm"
+        :variant="toolsOpen ? 'primary' : 'outline-secondary'"
+        title="Range, devices and view"
+        @click="toolsOpen = !toolsOpen"
+      ) ⚙
 
-  //- Range + devices, folded away by default so the phone opens on the data.
-  details.tools.mb-2(ref="tools")
-    summary
-      b Range &amp; devices
-      span.summary-note.ml-2 {{ toolSummary }}
-    div.tool-panel
-      div.mb-2
-        label.tool-label Mode
-        div
-          b-form-radio-group(v-model="mode" size="sm" buttons button-variant="outline-secondary" :options="modeOptions")
-      div.mb-2(v-if="mode === 'last_duration'")
-        label.tool-label Range
-        div
-          b-button-group(size="sm")
-            b-button(
-              v-for="d in durations"
-              :key="d.value"
-              :variant="duration === d.value ? 'primary' : 'outline-secondary'"
-              @click="duration = d.value"
-            ) {{ d.text }}
-      div.mb-2
-        label.tool-label Devices — untick to exclude, edit a name to rename
-        div.text-muted.small(v-if="!devices.length") No devices in this range.
-        div.device-row(v-for="d in devices" :key="d.device")
-          b-form-checkbox.mr-2(v-model="enabled[d.device]" @change="onDeviceToggle")
-          span.device-key.mr-2 {{ shortName(d) }}
-          b-input.device-name(
-            size="sm"
-            :value="displayName(d)"
-            :placeholder="d.hostname || d.device"
-            @change="rename(d, $event)"
-          )
-          b-badge.ml-2(v-if="d.is_own" variant="info") THIS
-          span.device-uuid.ml-2 {{ d.device.slice(0, 8) }}…
+  //- Compact: both fold-outs move into the ⚙ sheet, so the phone opens on the data
+  //- with no fold-outs in the way at all. Wide: they stay where they were.
+  div.tools-wrap(:class="{ 'tools-sheet': compact, open: toolsOpen }")
+    div.sheet-head.compact-only(v-if="compact")
+      b Range, devices & view
+      b-button.ml-auto(size="sm" variant="outline-secondary" @click="toolsOpen = false") Done
+    //- Range + devices, folded away by default so the phone opens on the data.
+    details.tools.mb-2(ref="tools" :open="compact")
+      summary
+        b Range &amp; devices
+        span.summary-note.ml-2 {{ toolSummary }}
+      div.tool-panel
+        div.mb-2
+          label.tool-label Mode
+          div
+            b-form-radio-group(v-model="mode" size="sm" buttons button-variant="outline-secondary" :options="modeOptions")
+        div.mb-2(v-if="mode === 'last_duration'")
+          label.tool-label Range
+          div
+            b-button-group(size="sm")
+              b-button(
+                v-for="d in durations"
+                :key="d.value"
+                :variant="duration === d.value ? 'primary' : 'outline-secondary'"
+                @click="duration = d.value"
+              ) {{ d.text }}
+        div.mb-2
+          label.tool-label Devices — untick to exclude, edit a name to rename
+          div.text-muted.small(v-if="!devices.length") No devices in this range.
+          div.device-row(v-for="d in devices" :key="d.device")
+            b-form-checkbox.mr-2(v-model="enabled[d.device]" @change="onDeviceToggle")
+            span.device-key.mr-2 {{ shortName(d) }}
+            b-input.device-name(
+              size="sm"
+              :value="displayName(d)"
+              :placeholder="d.hostname || d.device"
+              @change="rename(d, $event)"
+            )
+            b-badge.ml-2(v-if="d.is_own" variant="info") THIS
+            span.device-uuid.ml-2 {{ d.device.slice(0, 8) }}…
 
-  //- Axis, zoom and what the drawing folds away. Collapsed by default too, so the
-  //- phone still opens straight on the timeline.
-  details.tools.mb-2
-    summary
-      b View
-      span.summary-note.ml-2 {{ viewSummary }}
-    div.tool-panel
-      div.mb-2
-        label.tool-label Time axis
+    //- Axis, zoom and what the drawing folds away. Collapsed by default too, so the
+    //- phone still opens straight on the timeline.
+    details.tools.mb-2(:open="compact")
+      summary
+        b View
+        span.summary-note.ml-2 {{ viewSummary }}
+      div.tool-panel
+        div.mb-2
+          label.tool-label Time axis
+          div
+            b-form-radio-group(
+              v-model="view.axis"
+              size="sm"
+              buttons
+              button-variant="outline-secondary"
+              :options="axisOptions"
+            )
+          div.text-muted.small.mt-1 Auto goes vertical on a narrow screen, horizontal on a wide one.
+        div.mb-2
+          label.tool-label Zoom — {{ view.fit ? 'fit to screen' : view.zoom + ' px / hour' }}
+          div
+            b-button-group(size="sm")
+              b-button(
+                v-for="z in zoomPresets"
+                :key="z.value"
+                :variant="!view.fit && view.zoom === z.value ? 'primary' : 'outline-secondary'"
+                @click="setZoom(z.value)"
+              ) {{ z.text }}
+          div.text-muted.small.mt-1 Pinch, or hold Ctrl and scroll, to zoom anywhere in between.
         div
-          b-form-radio-group(
-            v-model="view.axis"
-            size="sm"
-            buttons
-            button-variant="outline-secondary"
-            :options="axisOptions"
-          )
-        div.text-muted.small.mt-1 Auto goes vertical on a narrow screen, horizontal on a wide one.
-      div.mb-2
-        label.tool-label Zoom — {{ view.fit ? 'fit to screen' : view.zoom + ' px / hour' }}
-        div
-          b-button-group(size="sm")
-            b-button(
-              v-for="z in zoomPresets"
-              :key="z.value"
-              :variant="!view.fit && view.zoom === z.value ? 'primary' : 'outline-secondary'"
-              @click="setZoom(z.value)"
-            ) {{ z.text }}
-        div.text-muted.small.mt-1 Pinch, or hold Ctrl and scroll, to zoom anywhere in between.
-      div
-        label.tool-label Behaviour
-        div.checks
-          b-form-checkbox(v-model="view.collapseQuiet" size="sm") Collapse quiet time
-          b-form-checkbox(v-model="view.deviceTracks" size="sm") Device tracks
-          b-form-checkbox(v-model="view.fit" size="sm") Fit day to {{ fitAxisWord }}
+          label.tool-label Behaviour
+          div.checks
+            b-form-checkbox(v-model="view.collapseQuiet" size="sm") Collapse quiet time
+            b-form-checkbox(v-model="view.deviceTracks" size="sm") Device tracks
+            b-form-checkbox(v-model="view.fit" size="sm") Fit day to {{ fitAxisWord }}
+  div.tools-backdrop(v-if="compact && toolsOpen" @click="toolsOpen = false")
 
   div.alert.alert-danger(v-if="error") {{ error }}
 
-  div.summary-strip.mb-2(v-if="data")
+  div.summary-strip.mb-1(v-if="data" :class="{ compact }")
     div.stat
       span.v {{ fmt(combinedMinutes) }}
       span.k combined
@@ -96,7 +110,15 @@ div.combined-view
       span.k unresolved
 
   //- Whole day at a glance. Vertical scroll trades this away; the strip buys it back.
-  div.minimap(v-if="data" @click="onMinimapClick" ref="minimap" title="Whole day. Click to jump.")
+  div.minimap(
+    v-if="data"
+    ref="minimap"
+    title="Whole day. Tap to jump, drag to scrub."
+    @pointerdown="onMinimapDown"
+    @pointermove="onMinimapMove"
+    @pointerup="onMinimapUp"
+    @pointercancel="onMinimapUp"
+  )
     div.mm-track
       div.mm-b(
         v-for="(s, i) in segments"
@@ -109,7 +131,7 @@ div.combined-view
   //- Block stepper. Tapping a block is fine when it is big; at a whole-day zoom most
   //- blocks are a couple of pixels wide and cannot be hit with a thumb, so give the
   //- selection a keyboard/thumb path that does not depend on the block's size.
-  div.stepper.mb-1(v-if="data && stepRows.length")
+  div.stepper.mb-1(v-if="data && stepRows.length" :class="{ compact }" :style="stepperStyle")
     b-button-group(size="sm")
       b-button(
         :disabled="stepIndex === 0"
@@ -124,7 +146,7 @@ div.combined-view
     span.step-count.ml-2 {{ stepIndex >= 0 ? stepIndex + 1 : '–' }} / {{ stepRows.length }}
     span.step-track.ml-2 {{ activeTrack ? activeTrack.label : '' }}
 
-  div.d-flex.timeline-body(v-if="data")
+  div.d-flex.timeline-body(v-if="data" ref="body")
     ProportionalTimeline.flex-grow-1(
       ref="tl"
       :tracks="tracks"
@@ -141,44 +163,71 @@ div.combined-view
       @select="onSelect"
       @viewport="onViewport"
     )
-    aside.detail(v-if="selected" :class="{ sheet: !wideLayout }")
+    //- Compact: a two-stage sheet. It opens at a peek — what this block is, and the
+    //- one action worth taking on it — and only grows to the full detail if asked.
+    //- The rejected stopgap docked the whole panel at 60vh; a peek is ~1/6 of the
+    //- screen and still puts Resolve… under the thumb, which was the actual defect.
+    aside.detail(v-if="selected" ref="detail" :class="{ sheet: compact, expanded: detailOpen }")
+      div.grab(v-if="compact" @click="detailOpen = !detailOpen")
       div(v-if="selectedSegment")
-        h5.mb-0 {{ segmentTitle(selectedSegment) }}
-        p.when.mb-2 {{ clock(selectedSegment.start) }} – {{ clock(selectedSegment.end) }} · {{ fmt(minutesOf(selectedSegment)) }}
-        b-badge(:variant="selectedSegment.unresolved ? 'warning' : 'success'")
-          | {{ selectedSegment.unresolved ? 'Unresolved overlap' : 'Settled' }}
-        dl.dl.mt-3
-          dt Counted to
-          dd {{ deviceLabel(selectedSegment.device) }}
-        label.tool-label.mt-2 Source events — {{ sliceCount(selectedSegment) }}
-        ul.slices
-          li(v-for="(sl, i) in slicesOf(selectedSegment)" :key="i" :class="{ fg: sl.isForeground }")
-            span.swatch(:style="{ background: colorFor(sl.label) }")
-            span.flex-grow-1 {{ sl.label }}
-            span.dev {{ deviceLabel(sl.device) }}
-        //- The combined track is computed, never stored, so there is no combined
-        //- event for the editor to open. Say so rather than let it look missing.
-        div.note-inline.mt-2
-          | The combined track is #[b derived] — computed, never stored, so there is no combined
-          | event to edit. Open a device block below to edit the stored event.
-        div.resolve.mt-2(v-if="selectedSegment.unresolved")
-          b Resolve this overlap
-          div.small.mb-2 Both devices claim this time. Pick what actually counted — once, or as a standing rule.
-          b-button(size="sm" variant="primary" @click="openResolve") Resolve…
+        div.d-flex.align-items-start
+          div.flex-grow-1
+            h5.mb-0 {{ segmentTitle(selectedSegment) }}
+            p.when.mb-1 {{ clock(selectedSegment.start) }} – {{ clock(selectedSegment.end) }} · {{ fmt(minutesOf(selectedSegment)) }}
+            b-badge(:variant="selectedSegment.unresolved ? 'warning' : 'success'")
+              | {{ selectedSegment.unresolved ? 'Unresolved overlap' : 'Settled' }}
+          b-button.close-x(v-if="compact" size="sm" variant="outline-secondary" @click="clearSelection") ✕
+
+        //- Peek row: the primary action, always visible without expanding anything.
+        div.peek-actions.mt-2(v-if="compact")
+          b-button.act(
+            v-if="selectedSegment.unresolved"
+            variant="primary"
+            @click="openResolve"
+          ) Resolve…
+          b-button.act(variant="outline-secondary" @click="detailOpen = !detailOpen")
+            | {{ detailOpen ? 'Less' : 'Details' }}
+
+        div.detail-body(v-show="!compact || detailOpen")
+          dl.dl.mt-3
+            dt Counted to
+            dd {{ deviceLabel(selectedSegment.device) }}
+          label.tool-label.mt-2 Source events — {{ sliceCount(selectedSegment) }}
+          ul.slices
+            li(v-for="(sl, i) in slicesOf(selectedSegment)" :key="i" :class="{ fg: sl.isForeground }")
+              span.swatch(:style="{ background: colorFor(sl.label) }")
+              span.flex-grow-1 {{ sl.label }}
+              span.dev {{ deviceLabel(sl.device) }}
+          //- The combined track is computed, never stored, so there is no combined
+          //- event for the editor to open. Say so rather than let it look missing.
+          div.note-inline.mt-2
+            | The combined track is #[b derived] — computed, never stored, so there is no combined
+            | event to edit. Open a device block below to edit the stored event.
+          div.resolve.mt-2(v-if="selectedSegment.unresolved && !compact")
+            b Resolve this overlap
+            div.small.mb-2 Both devices claim this time. Pick what actually counted — once, or as a standing rule.
+            b-button(size="sm" variant="primary" @click="openResolve") Resolve…
 
       div(v-else-if="selectedEvent")
-        h5.mb-0 {{ selectedEvent.label }}
-        p.when.mb-2 {{ clock(selectedEvent.start) }} – {{ clock(selectedEvent.end) }} · {{ fmt(minutesOf(selectedEvent)) }}
-        b-badge(variant="secondary") Raw device event
-        dl.dl.mt-3
-          dt Device
-          dd {{ deviceLabel(selectedEvent.device) }}
-          dt Device id
-          dd.break {{ selectedEvent.device }}
-        div.note-inline.mt-2
-          | Per-device tracks are unmodified stored truth (#[b R11]) — this is the one you can edit.
+        div.d-flex.align-items-start
+          div.flex-grow-1
+            h5.mb-0 {{ selectedEvent.label }}
+            p.when.mb-1 {{ clock(selectedEvent.start) }} – {{ clock(selectedEvent.end) }} · {{ fmt(minutesOf(selectedEvent)) }}
+            b-badge(variant="secondary") Raw device event
+          b-button.close-x(v-if="compact" size="sm" variant="outline-secondary" @click="clearSelection") ✕
+        div.peek-actions.mt-2(v-if="compact")
+          b-button.act(variant="outline-secondary" @click="detailOpen = !detailOpen")
+            | {{ detailOpen ? 'Less' : 'Details' }}
+        div.detail-body(v-show="!compact || detailOpen")
+          dl.dl.mt-3
+            dt Device
+            dd {{ deviceLabel(selectedEvent.device) }}
+            dt Device id
+            dd.break {{ selectedEvent.device }}
+          div.note-inline.mt-2
+            | Per-device tracks are unmodified stored truth (#[b R11]) — this is the one you can edit.
 
-      b-button.mt-3(size="sm" variant="outline-secondary" @click="clearSelection") Close
+      b-button.mt-3(v-if="!compact" size="sm" variant="outline-secondary" @click="clearSelection") Close
 
   //- Roadmap 4.1. Outside .timeline-body on purpose: it is a fixed-position overlay,
   //- and nesting it in a scrolling flex child makes it inherit that child's clipping.
@@ -260,6 +309,21 @@ export default Vue.extend({
       resolving: null as Segment | null,
       viewport: { start: 0, end: 24 * 60 },
       windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1024,
+      /** Roadmap 4.1b. The ⚙ sheet holding the two fold-outs, on a compact screen. */
+      toolsOpen: false,
+      /** Roadmap 4.1b. Stage two of the detail sheet — the peek is the default. */
+      detailOpen: false,
+      /**
+       * Roadmap 4.1b. Pixels the timeline may occupy, measured rather than assumed:
+       * everything above it is fixed-height, so the timeline takes exactly the rest
+       * of the viewport and the page itself never needs to scroll. 0 until measured.
+       */
+      availableHeight: 0,
+      /** Pixels left for the timeline once the measured header is subtracted. */
+      timelineSpace: 0,
+      /** Height of the detail peek, so the floating stepper can sit above it. */
+      detailHeight: 0,
+      draggingMap: false,
       // Local, live copy of settings.combined_view. Seeded from the store once it
       // has loaded (see mounted) and written back, debounced, on every change.
       view: {
@@ -316,6 +380,31 @@ export default Vue.extend({
     wideLayout(): boolean {
       return this.windowWidth >= 980;
     },
+    /**
+     * Roadmap 4.1b — the phone/portrait-tablet layout. Same breakpoint the detail
+     * panel already used to become a sheet, so there is one narrow layout rather
+     * than two that disagree between 640 and 980. Desktop (R35) is untouched.
+     */
+    compact(): boolean {
+      return !this.wideLayout;
+    },
+    /**
+     * Pin the whole view to the viewport when compact. This is the fix for the
+     * defect that started 4.1b: with the root a fixed height and nothing below the
+     * timeline, the *page* has nothing to scroll, so a thumb-drag can only move the
+     * timeline — no two scroll containers competing for the same gesture.
+     */
+    rootStyle(): any {
+      if (!this.compact || !this.availableHeight) return {};
+      return { height: `${this.rootHeight}px`, overflow: 'hidden' };
+    },
+    rootHeight(): number {
+      return this.availableHeight;
+    },
+    stepperStyle(): any {
+      if (!this.compact) return {};
+      return { bottom: `${(this.selected ? this.detailHeight : 0) + 10}px` };
+    },
     /** The axis the drawing resolves to right now — for the "fit to width/height" wording. */
     resolvedVertical(): boolean {
       if (this.view.axis === 'vertical') return true;
@@ -330,7 +419,12 @@ export default Vue.extend({
       const zoom = this.view.fit ? 'fit' : `${this.view.zoom}px`;
       return `${axis} · ${zoom}`;
     },
+    /**
+     * Compact: whatever is left of the viewport under the header, measured. Wide:
+     * the fixed heights it has always had.
+     */
     timelineHeight(): number {
+      if (this.compact && this.timelineSpace > 0) return this.timelineSpace;
       return this.windowWidth < 640 ? 520 : 500;
     },
     segments(): Segment[] {
@@ -497,6 +591,11 @@ export default Vue.extend({
   },
   watch: {
     date: 'reload',
+    // The body lock only applies to the compact layout, and a rotation can cross
+    // the breakpoint in either direction.
+    compact() {
+      this.applyBodyLock();
+    },
     mode() {
       this.clearSelection();
     },
@@ -523,12 +622,18 @@ export default Vue.extend({
   },
   async mounted() {
     window.addEventListener('resize', this.onResize);
+    this.applyBodyLock();
+    this.measure();
     window.addEventListener('keydown', this.onKeydown);
     this.reload();
     await useSettingsStore().ensureLoaded();
     this.seedView(this.combined_view);
   },
+  updated() {
+    this.measure();
+  },
   beforeDestroy() {
+    document.body.classList.remove('aw-fixed-view');
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('keydown', this.onKeydown);
     clearTimeout(this.viewSaveTimer);
@@ -536,6 +641,49 @@ export default Vue.extend({
   methods: {
     onResize() {
       this.windowWidth = window.innerWidth;
+      this.applyBodyLock();
+      this.measure();
+    },
+    /**
+     * Criterion 1 of roadmap 4.1b is "one scroller, or none". Sizing this view to
+     * the viewport is not enough on its own: aw-webui's own container padding still
+     * left ~135px of page scroll under it, and a drag that reached the end of the
+     * timeline chained into moving the page. Locking the body is what actually
+     * leaves a single scroller on the screen. Removed again in beforeDestroy, so no
+     * other view inherits it.
+     */
+    applyBodyLock() {
+      if (typeof document === 'undefined') return;
+      document.body.classList.toggle('aw-fixed-view', this.compact);
+    },
+    /**
+     * Roadmap 4.1b. Measure rather than assume: read where the timeline actually
+     * starts and how tall the detail peek actually is, so the layout survives a
+     * different font size, a wrapped header, or the Android status bar changing
+     * height. Cheap, idempotent, and only writes when a value really moved.
+     */
+    measure() {
+      if (typeof window === 'undefined') return;
+      const root = this.$el as HTMLElement;
+      if (!root) return;
+      // Where the view starts on the *page*, not in the viewport. Using the viewport
+      // position feeds back on itself: arrive on a scrolled page, measure a larger
+      // gap, grow the timeline, keep the page scrollable, and the header ends up
+      // above the fold — which is the very failure this step exists to remove.
+      if (this.compact && window.scrollY !== 0) window.scrollTo(0, 0);
+      const rootTop = root.getBoundingClientRect().top + window.scrollY;
+      const avail = Math.max(240, window.innerHeight - rootTop - 4);
+      if (Math.abs(avail - this.availableHeight) > 1) this.availableHeight = avail;
+
+      const body = this.$refs.body as HTMLElement | undefined;
+      if (body) {
+        const used = body.getBoundingClientRect().top - root.getBoundingClientRect().top;
+        const space = Math.max(160, avail - used - 4);
+        if (Math.abs(space - this.timelineSpace) > 1) this.timelineSpace = space;
+      }
+      const detail = this.$refs.detail as HTMLElement | undefined;
+      const h = detail && this.compact ? detail.getBoundingClientRect().height : 0;
+      if (Math.abs(h - this.detailHeight) > 1) this.detailHeight = h;
     },
     /** Copy the stored view prefs into the local live copy, without triggering a save. */
     seedView(v: any) {
@@ -562,6 +710,7 @@ export default Vue.extend({
     clearSelection() {
       this.selected = null;
       this.selectedKey = null;
+      this.detailOpen = false;
     },
     async reload() {
       this.error = null;
@@ -720,6 +869,9 @@ export default Vue.extend({
       const same = this.selectedKey === key;
       this.selected = same ? null : ref;
       this.selectedKey = same ? null : key;
+      // Every block opens at the peek. Stepping through ten in a row should not
+      // leave the sheet expanded over the timeline from the one before.
+      this.detailOpen = false;
     },
     onViewport(v: { start: number; end: number }) {
       this.viewport = v;
@@ -734,12 +886,33 @@ export default Vue.extend({
       if (!s.unresolved) style.background = this.colorFor(s.label);
       return style;
     },
-    onMinimapClick(e: MouseEvent) {
+    /**
+     * Roadmap 4.1b — "not just tappable but also draggable". A pointerdown jumps,
+     * and holding and moving scrubs the day continuously. Pointer capture keeps the
+     * drag alive when the thumb leaves the 24px strip, which on a phone it always
+     * does; without it the scrub dies on the first vertical wobble.
+     */
+    scrubTo(clientX: number) {
       const el = this.$refs.minimap as HTMLElement;
       if (!el) return;
       const r = el.getBoundingClientRect();
-      const minute = ((e.clientX - r.left) / r.width) * 24 * 60;
+      const minute = ((clientX - r.left) / r.width) * 24 * 60;
       (this.$refs.tl as any)?.scrollToMinute(Math.max(0, Math.min(24 * 60, minute)));
+    },
+    onMinimapDown(e: PointerEvent) {
+      this.draggingMap = true;
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      this.scrubTo(e.clientX);
+      e.preventDefault();
+    },
+    onMinimapMove(e: PointerEvent) {
+      if (!this.draggingMap) return;
+      this.scrubTo(e.clientX);
+      e.preventDefault();
+    },
+    onMinimapUp(e: PointerEvent) {
+      this.draggingMap = false;
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
     },
   },
 });
@@ -748,6 +921,89 @@ export default Vue.extend({
 <style scoped lang="scss">
 .combined-view {
   max-width: 100%;
+}
+
+// ---------------------------------------------------------------------------
+// Roadmap 4.1b — the compact (phone / portrait-tablet) layout.
+//
+// The rule the whole thing turns on: below 980px the view is exactly as tall as
+// the viewport and hides its own overflow, and everything above the timeline has
+// a fixed height. The timeline is then the only scroll container on the screen,
+// so a thumb-drag cannot be eaten by the wrong one, and nothing can end up below
+// the fold where it cannot be reached. Everything else here is that rule's
+// consequences: the fold-outs move into a ⚙ sheet, the stat strip loses its box,
+// the stepper floats instead of costing a band, and the detail opens at a peek.
+// ---------------------------------------------------------------------------
+.combined-view.compact {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+
+  .hdr {
+    flex: 0 0 auto;
+    h3 {
+      font-size: 1.05rem;
+    }
+  }
+  .summary-strip,
+  .minimap,
+  .alert {
+    flex: 0 0 auto;
+  }
+  .timeline-body {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .gear {
+    line-height: 1;
+    padding: 0.25rem 0.5rem;
+    font-size: 1rem;
+  }
+}
+
+// The ⚙ sheet. Same two panels, moved off the screen's critical path — they are
+// occasional settings, and they were costing 72px above the data every time.
+.tools-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1045;
+  max-height: 80vh;
+  overflow: auto;
+  padding: 6px 10px 14px;
+  background-color: var(--bg, #fff);
+  border-top: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 -2px 18px rgba(0, 0, 0, 0.25);
+  transform: translateY(101%);
+  transition: transform 0.18s ease-out;
+
+  &.open {
+    transform: translateY(0);
+  }
+  // Inside the sheet the fold-outs are just sections; their summary rows would be
+  // a second, pointless layer of folding.
+  details.tools > summary {
+    display: none;
+  }
+  details.tools {
+    border: 0;
+  }
+  .tool-panel {
+    padding: 0 0 6px;
+  }
+}
+.tools-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1044;
+  background: rgba(0, 0, 0, 0.35);
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  padding: 2px 0 8px;
 }
 
 details.tools {
@@ -843,6 +1099,37 @@ details.tools {
       opacity: 0.65;
     }
   }
+
+  // "stat tiles are taking extra space they can be neater" — the numbers stay, the
+  // box, the dividers and the stacked labels go. 57px of tiles becomes one 24px line.
+  &.compact {
+    border: 0;
+    border-radius: 0;
+    gap: 14px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+
+    .stat {
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      flex: 0 1 auto;
+      min-width: 0;
+      padding: 1px 0;
+      border-right: 0;
+
+      .v {
+        display: inline;
+        font-size: 13px;
+      }
+      .k {
+        font-size: 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+  }
 }
 
 .stepper {
@@ -851,6 +1138,29 @@ details.tools {
   // Right-aligned so it sits over the timeline's own scroll area rather than the
   // hour-label gutter, and stays under the thumb on a phone held one-handed.
   justify-content: flex-end;
+
+  // Compact: a floating pill over the timeline rather than a 31px band above it,
+  // lifted clear of the detail peek when one is open (see stepperStyle).
+  &.compact {
+    position: fixed;
+    right: 10px;
+    z-index: 1035;
+    margin: 0;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background-color: var(--bg, #fff);
+    box-shadow: 0 1px 10px rgba(0, 0, 0, 0.28);
+    transition: bottom 0.15s ease-out;
+
+    .step-track {
+      display: none;
+    }
+    // 44px, because stepping is how ten overlaps in a row actually get walked.
+    .btn {
+      min-height: 44px;
+      min-width: 64px;
+    }
+  }
 }
 .step-count {
   font-variant-numeric: tabular-nums;
@@ -870,6 +1180,9 @@ details.tools {
   height: 26px;
   cursor: pointer;
   margin-bottom: 6px;
+
+  // A horizontal scrub must not be turned into a page pan or a pull-to-refresh.
+  touch-action: none;
 
   .mm-track {
     position: relative;
@@ -904,6 +1217,10 @@ details.tools {
   align-items: stretch;
   flex-wrap: wrap;
 }
+.combined-view.compact .timeline-body {
+  // Reaching the end of the timeline must not start scrolling something else.
+  overscroll-behavior: contain;
+}
 .detail {
   width: 300px;
   flex: 0 0 300px;
@@ -911,14 +1228,15 @@ details.tools {
   padding: 12px;
   overflow: auto;
 
-  // Narrow layout: a fixed sheet over the timeline, not a block underneath it.
+  // Roadmap 4.1b — a two-stage sheet, replacing the docked 60vh panel that was
+  // rejected ("that is like more than half of the screen").
   //
-  // Underneath is where it started, and on a phone that made it unreachable. The
-  // timeline is 520px tall and takes the whole viewport, and it is itself a scroll
-  // container, so every vertical drag scrolls *it* — the page never moves and nothing
-  // below the timeline can be reached. On a device that meant the Resolve… button
-  // (roadmap 4.1) existed but could not be got to. Selecting a block now raises the
-  // detail over the timeline, which is also what a phone user expects from a tap.
+  // Stage one is a peek: what the block is, and the one action worth taking on it.
+  // It is ~130px, it never covers the timeline it describes, and Resolve… is inside
+  // it — which is the whole point, since the defect that started 4.1b was that
+  // button being real and unreachable. Stage two, on Details, grows to 80vh with
+  // its own scroll for the source-event list, and collapses again on the next
+  // block. The peek is what you see while resolving ten in a row.
   &.sheet {
     position: fixed;
     left: 0;
@@ -926,13 +1244,54 @@ details.tools {
     bottom: 0;
     z-index: 1040;
     width: auto;
-    max-height: 60vh;
-    overflow: auto;
+    flex: none;
+    max-height: 80vh;
+    overflow: hidden;
+    padding: 4px 12px 12px;
     border-left: 0;
     border-top: 1px solid rgba(128, 128, 128, 0.3);
     border-radius: 12px 12px 0 0;
-    background-color: #fff;
+    background-color: var(--bg, #fff);
     box-shadow: 0 -2px 18px rgba(0, 0, 0, 0.25);
+
+    &.expanded {
+      overflow: auto;
+    }
+    .grab {
+      width: 40px;
+      height: 4px;
+      margin: 4px auto 6px;
+      border-radius: 2px;
+      background: rgba(128, 128, 128, 0.45);
+      cursor: pointer;
+    }
+    h5 {
+      font-size: 1rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .close-x {
+      flex: 0 0 auto;
+      min-width: 44px;
+      min-height: 44px;
+    }
+    // Resolving is a primary job on this screen now, so the action row is thumb-sized
+    // rather than the sm buttons the wide panel uses.
+    .peek-actions {
+      display: flex;
+      gap: 8px;
+
+      .act {
+        flex: 1 1 0;
+        min-height: 44px;
+        font-size: 0.95rem;
+      }
+    }
+    .detail-body {
+      max-height: calc(80vh - 150px);
+      overflow: auto;
+    }
   }
   .when {
     font-family: monospace;
@@ -1010,5 +1369,17 @@ details.tools {
   border-radius: 5px;
   padding: 8px;
   font-size: 12px;
+}
+</style>
+
+<!--
+  Unscoped on purpose: `body` is outside this component. Roadmap 4.1b, criterion 1 --
+  with the view sized to the viewport, this is what leaves exactly one scroller on a
+  phone. The class is added on mount when compact and removed in beforeDestroy.
+-->
+<style lang="scss">
+body.aw-fixed-view {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 </style>
