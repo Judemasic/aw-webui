@@ -103,8 +103,12 @@ export function getCategoryColorFromString(str: string): string {
 function fallbackColor(str: string): string {
   // Get fallback color
   // TODO: Fetch setting from somewhere better, where defaults are respected
+  // `typeof`, not a plain comparison: where there is no localStorage at all -- node,
+  // a worker, a server-side render -- `localStorage !== undefined` does not evaluate to
+  // false, it throws a ReferenceError on an undeclared identifier. Only `typeof` is safe
+  // on a name that may not exist.
   const useColorFallback =
-    localStorage !== undefined ? localStorage.useColorFallback === 'true' : true;
+    typeof localStorage !== 'undefined' ? localStorage.useColorFallback === 'true' : true;
   if (useColorFallback) {
     return getColorFromString(str);
   } else {
@@ -175,4 +179,31 @@ export function getCategoryColorFromEvent(bucket: IBucket, e: IEvent) {
   }
 
   return getColorFromString(getTitleAttr(bucket, e));
+}
+
+/**
+ * The colour for an activity label, decided by the owner's categories.
+ *
+ * The Combined timeline used to hash the app name into a fixed four-tone scale, which
+ * meant the one screen the owner spends the most time on was the one screen their
+ * category colours had no say over. Colour now means the same thing everywhere: it is
+ * whatever Categorization says it is, and Categorization is the only place to change it.
+ *
+ * Two things this cannot do, both worth knowing:
+ *
+ *  - The combined track's label is the **app name alone**, so a category rule written
+ *    against a window *title* will not match here even though it matches in Activity.
+ *  - A label matching no category falls back to the app-name hash (or flat grey, if the
+ *    owner turned the fallback off), exactly as everywhere else — so uncategorised time
+ *    stays distinguishable rather than collapsing into one colour.
+ *
+ * `classes` is passed in rather than loaded, because the caller draws hundreds of blocks
+ * per day and `loadClasses()` is not free. Pass `categoryStore.classes`.
+ */
+export function getCategoryColorForLabel(label: string, classes: Category[]): string {
+  const matched = matchString(label || '', classes);
+  if (matched !== null) {
+    return getColorFromCategory(matched, classes);
+  }
+  return fallbackColor(label || '');
 }

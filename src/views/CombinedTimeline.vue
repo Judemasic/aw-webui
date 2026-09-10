@@ -386,8 +386,9 @@ import Vue from 'vue';
 import moment from 'moment';
 import { mapState } from 'pinia';
 import { useSettingsStore } from '~/stores/settings';
+import { useCategoryStore } from '~/stores/categories';
 import { getClient } from '~/util/awclient';
-import { getColorFromString } from '~/util/color';
+import { getCategoryColorForLabel } from '~/util/color';
 import { ulid } from '~/util/ulid';
 import ProportionalTimeline from '~/visualizations/ProportionalTimeline.vue';
 import ResolutionSheet from '~/visualizations/ResolutionSheet.vue';
@@ -446,6 +447,10 @@ export default Vue.extend({
       mode: 'last_duration',
       duration: 24 * 60 * 60,
       enabled: {} as Record<string, boolean>,
+      categoryStore: useCategoryStore(),
+      // label -> colour, so a day of several hundred blocks does not re-run every
+      // category regex on every redraw. Dropped whenever the categories change.
+      colorCache: new Map<string, string>(),
       selected: null as any,
       selectedKey: null as string | null,
       /** The segment the resolution sheet is open on, or null. Roadmap 4.1. */
@@ -829,6 +834,15 @@ export default Vue.extend({
   },
   watch: {
     date: 'reload',
+    // Editing a category in Settings must repaint the day, not leave it on the colours
+    // the categories used to have.
+    'categoryStore.classes': {
+      deep: true,
+      handler() {
+        this.colorCache.clear();
+        this.$forceUpdate();
+      },
+    },
     // The body lock only applies to the compact layout, and a rotation can cross
     // the breakpoint in either direction.
     compact() {
@@ -871,6 +885,12 @@ export default Vue.extend({
     window.addEventListener('keydown', this.onKeydown);
     this.reload();
     await useSettingsStore().ensureLoaded();
+    // Blocks are coloured by category now, so the categories have to be there before
+    // the first draw -- otherwise the day paints itself in the fallback and stays that
+    // way until something else forces a redraw.
+    await this.categoryStore.load();
+    this.colorCache.clear();
+    this.$forceUpdate();
     this.seedView(this.combined_view);
   },
   updated() {
@@ -1029,7 +1049,14 @@ export default Vue.extend({
       return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
     },
     colorFor(label: string): string {
-      return getColorFromString(label);
+      // Colour is whatever Categorization says it is -- the same answer the Activity
+      // view gives -- rather than a hash of the app name that nothing could change.
+      const key = label || '';
+      const hit = this.colorCache.get(key);
+      if (hit !== undefined) return hit;
+      const color = getCategoryColorForLabel(key, this.categoryStore.classes);
+      this.colorCache.set(key, color);
+      return color;
     },
 
     /** Foreground first, then the background slices — the order the bands are drawn in. */
