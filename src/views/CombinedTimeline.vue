@@ -90,6 +90,23 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
                 @click="setZoom(z.value)"
               ) {{ z.text }}
           div.text-muted.small.mt-1 Pinch, or hold Ctrl and scroll, to zoom anywhere in between.
+        //- Roadmap 4.5. A display setting and nothing more: the number goes out with the
+        //- request, the day is recomputed from the same stored events and the same
+        //- decisions, and turning it off brings every sliver straight back.
+        div.mb-2
+          label.tool-label Smoothing — {{ sliverLabel }}
+          div
+            b-button-group(size="sm")
+              b-button(
+                v-for="sv in sliverPresets"
+                :key="sv.value"
+                :variant="view.sliverSeconds === sv.value ? 'primary' : 'outline-secondary'"
+                @click="view.sliverSeconds = sv.value"
+              ) {{ sv.text }}
+          div.text-muted.small.mt-1
+            | A flick shorter than this stops being a block of its own and joins the stretch it
+            | interrupted. Nothing is written and nothing is lost — a smoothed block says what it
+            | swallowed, and #[b Off] draws the day literally.
         div
           label.tool-label Behaviour
           div.checks
@@ -142,32 +159,49 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
   //- two arrows with the count between them — a grouped pair of dark buttons sitting
   //- inside a white pill, with the count hanging off the end, read as two controls
   //- that had collided rather than one.
-  div.stepper.mb-1(v-if="data && stepRows.length && !compact")
+  div.stepper.mb-1(v-if="data && (stepRows.length || view.resolveMode) && !compact")
     b-button-group(size="sm")
       b-button(
-        :disabled="stepIndex === 0"
+        :disabled="!stepRows.length || stepIndex === 0"
         title="Previous block (←)"
         @click="step(-1)"
       ) ‹ Prev
       b-button(
-        :disabled="stepIndex >= 0 && stepIndex === stepRows.length - 1"
+        :disabled="!stepRows.length || (stepIndex >= 0 && stepIndex === stepRows.length - 1)"
         title="Next block (→)"
         @click="step(1)"
       ) Next ›
-    span.step-count.ml-2 {{ stepIndex >= 0 ? stepIndex + 1 : '–' }} / {{ stepRows.length }}
-    span.step-track.ml-2 {{ activeTrack ? activeTrack.label : '' }}
+    //- Roadmap 4.5. Prev/Next walked every block, which on a day of four hundred of them is
+    //- not a way to answer the six that are still asking. In resolve mode the same two arrows
+    //- walk only those, and answering one moves to the next by itself.
+    b-button.ml-2(
+      size="sm"
+      :variant="view.resolveMode ? 'warning' : 'outline-secondary'"
+      :title="resolveModeTitle"
+      @click="toggleResolveMode"
+    ) {{ view.resolveMode ? 'Resolving' : 'Resolve mode' }}
+    span.step-count.ml-2 {{ stepLabel }}
+    span.step-track.ml-2 {{ view.resolveMode ? '' : activeTrack ? activeTrack.label : '' }}
 
-  div.stepper.compact(v-if="data && stepRows.length && compact" ref="stepper" :style="stepperStyle")
+  div.stepper.compact(v-if="data && (stepRows.length || view.resolveMode) && compact" ref="stepper" :style="stepperStyle")
+    //- The mode switch sits inside the pill rather than in the ⚙ sheet: it changes what the
+    //- two arrows next to it do, and a control that changes another control belongs beside it.
+    button.st-mode(
+      type="button"
+      :class="{ on: view.resolveMode }"
+      :title="resolveModeTitle"
+      @click="toggleResolveMode"
+    ) !
     button.st-arrow(
       type="button"
-      :disabled="stepIndex === 0"
+      :disabled="!stepRows.length || stepIndex === 0"
       title="Previous block"
       @click="step(-1)"
     ) ‹
-    span.st-count {{ stepIndex >= 0 ? stepIndex + 1 : '–' }} / {{ stepRows.length }}
+    span.st-count(:class="{ done: view.resolveMode && !stepRows.length }") {{ stepLabel }}
     button.st-arrow(
       type="button"
-      :disabled="stepIndex >= 0 && stepIndex === stepRows.length - 1"
+      :disabled="!stepRows.length || (stepIndex >= 0 && stepIndex === stepRows.length - 1)"
       title="Next block"
       @click="step(1)"
     ) ›
@@ -252,6 +286,15 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
               span.dev {{ deviceLabel(sl.device) }}
           //- The combined track is computed, never stored, so there is no combined
           //- event for the editor to open. Say so rather than let it look missing.
+          //- Roadmap 4.5. Rounding that hides things silently is a lie about the day, so a
+          //- block that swallowed a sliver names it and says how long it was.
+          div.smoothed-note.mt-2(v-if="selectedSegment.smoothed_seconds > 0")
+            b Smoothed
+            div.small
+              | {{ fmtSeconds(selectedSegment.smoothed_seconds) }} of
+              |  {{ (selectedSegment.absorbed_labels || []).join(', ') || 'the same activity' }}
+              |  joined this block. Set #[b Smoothing] to #[b Off] under ⚙ ▸ View to see it
+              |  drawn separately.
           div.note-inline.mt-2
             | The combined track is #[b derived] — computed, never stored, so there is no combined
             | event to edit. Open a device block below to edit the stored event.
@@ -373,6 +416,10 @@ interface Segment {
   /** True when `label` is the owner's own words rather than an app name. */
   relabelled: boolean;
   deliberate_background: string[];
+  /** Roadmap 4.5 — seconds folded in from slivers the smoother rounded away. */
+  smoothed_seconds: number;
+  /** Roadmap 4.5 — what those slivers were, so the block can say what it swallowed. */
+  absorbed_labels: string[];
 }
 interface DeviceEvent {
   start: string;
@@ -438,13 +485,30 @@ export default Vue.extend({
         collapseQuiet: true,
         deviceTracks: true,
         fit: false,
+        /** Roadmap 4.5 — the smoothing threshold, in seconds. 0 is off (literal). */
+        sliverSeconds: 15,
+        /** Roadmap 4.5 — the arrows walk only blocks that are still asking. */
+        resolveMode: false,
       },
+      /**
+       * Roadmap 4.5. The threshold the day on screen was actually fetched with. Smoothing
+       * happens on the server, so changing the number means a refetch -- and the stored
+       * preference lands after the first fetch has already gone out with the default.
+       */
+      fetchedSliver: null as number | null,
       viewReady: false,
       viewSaveTimer: null as any,
       axisOptions: [
         { text: 'Auto', value: 'auto' },
         { text: 'Vertical', value: 'vertical' },
         { text: 'Horizontal', value: 'horizontal' },
+      ],
+      sliverPresets: [
+        { text: 'Off', value: 0 },
+        { text: '10s', value: 10 },
+        { text: '15s', value: 15 },
+        { text: '30s', value: 30 },
+        { text: '60s', value: 60 },
       ],
       zoomPresets: [
         { text: 'Day', value: 34 },
@@ -532,7 +596,30 @@ export default Vue.extend({
     viewSummary(): string {
       const axis = this.view.axis;
       const zoom = this.view.fit ? 'fit' : `${this.view.zoom}px`;
-      return `${axis} · ${zoom}`;
+      return `${axis} · ${zoom} · ${this.sliverLabel}`;
+    },
+    sliverLabel(): string {
+      return this.view.sliverSeconds > 0
+        ? `round under ${this.view.sliverSeconds}s`
+        : 'off — literal';
+    },
+    /**
+     * Roadmap 4.5. What the two arrows do right now, spelled out rather than implied by a
+     * highlighted button: the mode changes what Next means, and a mode you cannot read is a
+     * mode you will forget you left on.
+     */
+    stepLabel(): string {
+      const n = this.stepRows.length;
+      if (this.view.resolveMode) {
+        if (!n) return 'nothing left to answer';
+        return `${this.stepIndex >= 0 ? this.stepIndex + 1 : '–'} / ${n} unanswered`;
+      }
+      return `${this.stepIndex >= 0 ? this.stepIndex + 1 : '–'} / ${n}`;
+    },
+    resolveModeTitle(): string {
+      return this.view.resolveMode
+        ? 'Resolve mode is on — the arrows walk only unanswered overlaps'
+        : 'Resolve mode — make the arrows walk only unanswered overlaps';
     },
     /**
      * Compact: whatever is left of the viewport under the header, measured. Wide:
@@ -641,6 +728,8 @@ export default Vue.extend({
      */
     activeTrack(): any {
       const ts = this.tracks;
+      // Only the combined track has questions on it, so resolve mode has nowhere else to be.
+      if (this.view.resolveMode) return ts[0] || null;
       if (this.selectedKey) {
         const found = ts.find((t: any) => t.rows.some((r: any) => r.key === this.selectedKey));
         if (found) return found;
@@ -656,6 +745,7 @@ export default Vue.extend({
       if (!this.activeTrack) return [];
       return this.activeTrack.rows
         .filter((r: any) => r.end > this.windowStart && r.start < this.windowEnd)
+        .filter((r: any) => !this.view.resolveMode || r.contended)
         .slice()
         .sort((a: any, b: any) => a.start - b.start);
     },
@@ -663,6 +753,23 @@ export default Vue.extend({
     stepIndex(): number {
       if (!this.selectedKey) return -1;
       return this.stepRows.findIndex((r: any) => r.key === this.selectedKey);
+    },
+    /**
+     * Where the selection starts, in minutes from midnight, whether or not it is one of the
+     * blocks the arrows currently walk.
+     *
+     * Roadmap 4.5. In resolve mode the selected block is routinely *not* in [stepRows] — you
+     * have just answered it, or you tapped a settled block to look at it — and "not in the
+     * list" used to mean Next went back to the start of the day. Knowing where you are is what
+     * lets it go to the next unanswered block instead.
+     */
+    selectedStartMinutes(): number | null {
+      if (!this.selectedKey) return null;
+      for (const track of this.tracks as any[]) {
+        const found = (track.rows || []).find((r: any) => r.key === this.selectedKey);
+        if (found) return found.start;
+      }
+      return null;
     },
     tracks(): any[] {
       const out: any[] = [
@@ -732,6 +839,12 @@ export default Vue.extend({
     },
     duration() {
       this.clearSelection();
+    },
+    // Smoothing is done on the server, so a new threshold is a new request -- unlike every
+    // other view preference, which only changes how the same data is drawn.
+    'view.sliverSeconds'() {
+      if (!this.viewReady) return;
+      this.reload();
     },
     view: {
       deep: true,
@@ -838,10 +951,15 @@ export default Vue.extend({
         collapseQuiet: v.collapseQuiet ?? true,
         deviceTracks: v.deviceTracks ?? true,
         fit: v.fit ?? false,
+        sliverSeconds: v.sliverSeconds ?? 15,
+        resolveMode: v.resolveMode ?? false,
       };
       // Let the seed settle before the watcher starts persisting changes.
       this.$nextTick(() => {
         this.viewReady = true;
+        // The first fetch went out before the store had loaded, so it used the default
+        // threshold. If the owner's stored one differs, the day on screen is the wrong day.
+        if (this.fetchedSliver !== this.view.sliverSeconds) this.reload();
       });
     },
     setZoom(px: number) {
@@ -863,7 +981,11 @@ export default Vue.extend({
       const end = this.dayStart.clone().add(1, 'day').toISOString();
       try {
         const client = getClient();
-        const res = await client.req.get('/0/combined/timeline', { params: { start, end } });
+        const sliver = this.view.sliverSeconds;
+        const res = await client.req.get('/0/combined/timeline', {
+          params: { start, end, sliver },
+        });
+        this.fetchedSliver = sliver;
         this.data = res.data;
         for (const d of this.data.devices as DeviceTrack[]) {
           if (this.enabled[d.device] === undefined) this.$set(this.enabled, d.device, true);
@@ -892,6 +1014,10 @@ export default Vue.extend({
     },
     clock(iso: string): string {
       return moment(iso).format('HH:mm');
+    },
+    /** Seconds, for the smoothing note — where "0m" would be every answer `fmt` could give. */
+    fmtSeconds(seconds: number): string {
+      return seconds < 90 ? `${Math.round(seconds)}s` : this.fmt(seconds / 60);
     },
     fmt(minutes: number): string {
       // Round the total, then split it. Flooring the hours and rounding the
@@ -1023,15 +1149,63 @@ export default Vue.extend({
       const rows = this.stepRows;
       if (!rows.length) return;
       const i = this.stepIndex;
-      const next =
-        i < 0 ? (dir > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, i + dir));
-      const row = rows[next];
+      let next: number;
+      if (i >= 0) {
+        next = Math.min(rows.length - 1, Math.max(0, i + dir));
+      } else {
+        // Nothing selected, or something selected that these arrows do not walk. Step from
+        // where the eye is rather than from the start of the day.
+        const from = this.selectedStartMinutes;
+        if (from === null) next = dir > 0 ? 0 : rows.length - 1;
+        else if (dir > 0) {
+          const j = rows.findIndex((r: any) => r.start > from);
+          next = j < 0 ? rows.length - 1 : j;
+        } else {
+          let j = -1;
+          rows.forEach((r: any, k: number) => {
+            if (r.start < from) j = k;
+          });
+          next = j < 0 ? 0 : j;
+        }
+      }
+      this.selectRow(rows[next]);
+    },
+    /** Select one steppable row and bring it on screen. */
+    selectRow(row: any) {
       this.selected = row.ref;
       this.selectedKey = row.key;
+      // Every block opens at the peek, for the reason [onSelect] gives.
+      this.detailOpen = false;
       this.$nextTick(() => {
         const tl: any = this.$refs.tl;
         if (tl && tl.revealRange) tl.revealRange(row.start, row.end);
       });
+    },
+    /**
+     * Roadmap 4.5 — turn the sweep on or off.
+     *
+     * Turning it on jumps straight to something unanswered. The mode exists because the owner
+     * had no way to find the questions: on a day of several hundred blocks the six that are
+     * still asking are six shaded slivers to hunt for by eye.
+     */
+    toggleResolveMode() {
+      this.view.resolveMode = !this.view.resolveMode;
+      if (this.view.resolveMode && this.stepIndex < 0 && this.stepRows.length) this.step(1);
+    },
+    /**
+     * Roadmap 4.5 — after answering one question in resolve mode, go to the next.
+     *
+     * `from` is where the block that was just answered started; it is no longer in [stepRows],
+     * so the next one is the first that begins at or after it.
+     */
+    advanceToNextUnanswered(from: number | null) {
+      const rows = this.stepRows;
+      if (!rows.length) {
+        this.clearSelection();
+        return;
+      }
+      const j = from === null ? 0 : rows.findIndex((r: any) => r.start >= from);
+      this.selectRow(rows[j < 0 ? rows.length - 1 : j]);
     },
     /**
      * ← / → step too. Skipped while a form control has focus, so typing in the
@@ -1060,6 +1234,7 @@ export default Vue.extend({
      */
     async onResolved(decision: any) {
       const key = this.selectedKey;
+      const from = this.selectedStartMinutes;
       try {
         await getClient().req.post('/0/combined/decisions', decision);
       } catch (e: any) {
@@ -1068,10 +1243,11 @@ export default Vue.extend({
       }
       this.resolving = null;
       await this.reload();
-      // `reload` clears the selection. Put it back: the owner has just answered a question
-      // about this block and the natural next thing is to see the answer on it, not an
-      // empty panel and a timeline that scrolled home.
-      this.restoreSelection(key);
+      // `reload` clears the selection. What goes back depends on what the owner is doing.
+      // Sweeping through the questions (roadmap 4.5), the natural next thing is the next
+      // question; looking at one block, it is that block wearing its new answer.
+      if (this.view.resolveMode) this.advanceToNextUnanswered(from);
+      else this.restoreSelection(key);
     },
     /**
      * Roadmap 4.3 — take an answer back.
@@ -1512,6 +1688,41 @@ details.tools {
   font-variant-numeric: tabular-nums;
   font-size: 12.5px;
   opacity: 0.75;
+
+  // "nothing left to answer" is a whole phrase, not a counter, and it is the one message
+  // in this pill worth reading rather than glancing at.
+  &.done {
+    min-width: 0;
+    opacity: 1;
+    color: #1a7f4f;
+    font-weight: 600;
+    padding: 0 6px;
+  }
+}
+
+// Roadmap 4.5. Smaller than the arrows on purpose: it is the thing you touch once at the
+// start of a sweep, not the thing you touch six times during one. Lit, it carries the same
+// orange the shading on an unresolved block uses, so the mode and what it walks match.
+.st-mode {
+  width: 30px;
+  height: 30px;
+  margin-right: 2px;
+  padding: 0;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.6;
+
+  &.on {
+    opacity: 1;
+    color: #fff;
+    border-color: #b4541f;
+    background: #b4541f;
+  }
 }
 .step-count {
   font-variant-numeric: tabular-nums;
@@ -1757,6 +1968,15 @@ details.tools {
   border-left: 2px solid #b4541f;
   padding: 6px 8px;
   background: rgba(180, 84, 31, 0.08);
+  border-radius: 0 4px 4px 0;
+}
+// Roadmap 4.5. A quieter box than `.note-inline`: what was rounded away is a footnote about
+// the drawing, not a warning about the data.
+.smoothed-note {
+  font-size: 11.5px;
+  border-left: 2px solid rgba(128, 128, 128, 0.55);
+  padding: 6px 8px;
+  background: rgba(128, 128, 128, 0.08);
   border-radius: 0 4px 4px 0;
 }
 .resolve {

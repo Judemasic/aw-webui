@@ -47,6 +47,14 @@ div.pt-root(ref="root")
               span.pt-nm {{ b.label }}
               span.pt-du(v-if="b.primary") {{ r.duration }}
             span.pt-dv(v-if="b.sub") {{ b.sub }}
+
+      //- Roadmap 4.5. An outline on the block itself does not answer "which one is selected?":
+      //- at a whole-day zoom the selected block is often three pixels of a crowded lane, and the
+      //- ring around it is the same size as the block. This is a pair of rules drawn right across
+      //- the drawing at the selected block's start and end, so the selection can be found from
+      //- anywhere on screen instead of only once you have already found it. Last in the DOM and
+      //- `pointer-events: none`, so it covers nothing and catches nothing.
+      div.pt-cursor(v-if="cursor" :class="{ horiz: !isVertical }" :style="cursor")
 </template>
 
 <script lang="ts">
@@ -439,6 +447,39 @@ export default Vue.extend({
     },
 
     /**
+     * Where the selected block sits, expressed as a band across the whole drawing.
+     *
+     * Read off [laidOut] rather than recomputed, so it cannot drift from the block it marks --
+     * same numbers, same quiet-collapse mapping, one source.
+     */
+    cursor(): any {
+      if (this.selectedKey == null) return null;
+      let row: any = null;
+      for (const tr of this.laidOut) {
+        const found = tr.rows.find((r: any) => r.selected);
+        if (found) {
+          row = found;
+          break;
+        }
+      }
+      if (!row) return null;
+      if (this.isVertical) {
+        return {
+          left: `${Math.max(0, this.geom.laneOffset - 5)}px`,
+          right: '2px',
+          top: `${parseFloat(row.style.top)}px`,
+          height: `${Math.max(3, parseFloat(row.style.height))}px`,
+        };
+      }
+      return {
+        top: '18px',
+        bottom: '2px',
+        left: `${parseFloat(row.style.left)}px`,
+        width: `${Math.max(3, parseFloat(row.style.width))}px`,
+      };
+    },
+
+    /**
      * Everything that changes which minutes are on screen *without* the user
      * scrolling: the data (via the layout's total length), the measured width, the
      * axis, the height, and the day window itself. `viewportSignature` exists only
@@ -724,9 +765,14 @@ export default Vue.extend({
     outline-offset: 2px;
     z-index: 8;
   }
+  // `currentColor` here was white -- the block's own text colour -- so on a pale block the
+  // selection ring was invisible and on a dark one it was a hairline. Two rings instead: white
+  // against the block, then the accent against whatever is behind it. One of the two always has
+  // contrast, whatever colour the activity happens to have been given.
   &.sel {
-    outline: 2px solid currentColor;
+    outline: 2px solid #0e7c6b;
     outline-offset: 1px;
+    box-shadow: 0 0 0 1px #fff, 0 0 0 5px rgba(14, 124, 107, 0.3);
     z-index: 7;
   }
   // Stripes rather than a tint: a tint reads as "less of this activity",
@@ -771,6 +817,23 @@ export default Vue.extend({
     .pt-row1 {
       display: none;
     }
+  }
+}
+
+.pt-cursor {
+  position: absolute;
+  pointer-events: none;
+  z-index: 9;
+  border-radius: 2px;
+  border-top: 2px solid #0e7c6b;
+  border-bottom: 2px solid #0e7c6b;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
+
+  &.horiz {
+    border-top: 0;
+    border-bottom: 0;
+    border-left: 2px solid #0e7c6b;
+    border-right: 2px solid #0e7c6b;
   }
 }
 

@@ -61,6 +61,10 @@ interface State {
     collapseQuiet: boolean;
     deviceTracks: boolean;
     fit: boolean;
+    /** Roadmap 4.5 — stretches shorter than this stop being their own block. 0 is off (literal). */
+    sliverSeconds: number;
+    /** Roadmap 4.5 — the stepper walks only blocks that are still asking. */
+    resolveMode: boolean;
   };
 
   newReleaseCheckData: Record<string, any>;
@@ -125,6 +129,8 @@ export const useSettingsStore = defineStore('settings', {
       collapseQuiet: true,
       deviceTracks: true,
       fit: false,
+      sliverSeconds: 15,
+      resolveMode: false,
     },
 
     newReleaseCheckData: {
