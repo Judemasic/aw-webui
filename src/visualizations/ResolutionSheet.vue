@@ -103,8 +103,8 @@ div.rs-backdrop(@click.self="$emit('cancel')")
 //
 // This step is the sheet only. It builds a complete decision record — the full R14
 // signature included, because R15 says today's decisions are tomorrow's rules and a
-// signature not captured now cannot be recovered later — and emits it. Writing it to
-// `decisions.jsonl` and recomputing the day is 4.2.
+// signature not captured now cannot be recovered later — and emits it. Storing it and
+// recomputing the day is 4.2, and lives in the view that opens this sheet.
 
 import Vue from 'vue';
 import { ulid } from '~/util/ulid';
@@ -120,6 +120,17 @@ export default Vue.extend({
     ownDevice: { type: String, default: '' },
     /** uuid → human name, so the sheet never shows a raw uuid (a 3.4 defect). */
     deviceLabel: { type: Function, required: true },
+    /**
+     * uuid → the *role* a signature matches on. Deliberately not [[deviceLabel]].
+     *
+     * A label is what this device calls that device: a nickname the owner typed here, or
+     * "This device". Written into a signature it would be a rule key that means something
+     * different on every device — the peer that receives it would match it against nothing, or
+     * worse, against itself. The role is the device's hostname, which is the same string
+     * everywhere and is already how the shared folder names things. See
+     * `05_DATA_MODEL.md` §3 for why this is a role and not a uuid.
+     */
+    deviceRole: { type: Function, required: true },
     formatDuration: { type: Function, required: true },
     /** Timestamp → wall clock, for the header range. */
     clock: { type: Function, required: true },
@@ -197,7 +208,7 @@ export default Vue.extend({
     signature(): any {
       return {
         participants: this.participants.map((p: any) => ({
-          device_role: this.deviceLabel(p.device),
+          device_role: this.deviceRole(p.device),
           device_uuid: p.device,
           app: p.label,
           category: null,
@@ -225,7 +236,7 @@ export default Vue.extend({
       return {
         outcome: 'foreground',
         foreground: {
-          device_role: this.deviceLabel(w.device),
+          device_role: this.deviceRole(w.device),
           device_uuid: w.device,
           app: w.label,
         },

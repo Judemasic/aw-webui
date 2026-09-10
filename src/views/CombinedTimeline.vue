@@ -211,8 +211,8 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
           div.flex-grow-1
             h5.mb-0 {{ segmentTitle(selectedSegment) }}
             p.when.mb-1 {{ clock(selectedSegment.start) }} – {{ clock(selectedSegment.end) }} · {{ fmt(minutesOf(selectedSegment)) }}
-            b-badge(:variant="selectedSegment.unresolved ? 'warning' : 'success'")
-              | {{ selectedSegment.unresolved ? 'Unresolved overlap' : 'Settled' }}
+            b-badge(:variant="segmentBadge(selectedSegment).variant")
+              | {{ segmentBadge(selectedSegment).text }}
           b-button.close-x(v-if="compact" size="sm" variant="outline-secondary" @click="clearSelection") ✕
 
         //- Peek row: the primary action, always visible without expanding anything.
@@ -223,10 +223,10 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
         //- way on the device. There is room for the whole phrase, so it says it.
         div.peek-actions.mt-2(v-if="compact")
           b-button.act(
-            v-if="selectedSegment.unresolved"
-            variant="primary"
+            v-if="canResolve(selectedSegment)"
+            :variant="selectedSegment.unresolved ? 'primary' : 'outline-primary'"
             @click="openResolve"
-          ) Resolve overlap
+          ) {{ selectedSegment.resolved_by ? 'Change answer' : 'Resolve overlap' }}
           b-button.act(variant="outline-secondary" @click="detailOpen = !detailOpen")
             | {{ detailOpen ? 'Less' : 'Details' }}
 
@@ -245,13 +245,26 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
           div.note-inline.mt-2
             | The combined track is #[b derived] — computed, never stored, so there is no combined
             | event to edit. Open a device block below to edit the stored event.
-          div.resolve.mt-2(v-if="selectedSegment.unresolved && !compact")
-            b Resolve this overlap
-            div.small.mb-2 Both devices claim this time. Pick what actually counted — once, or as a standing rule.
+          //- Roadmap 4.2: a resolved block says so, and by what. `auto_resolved` is the
+          //- distinction R16 asks for — the owner never answered *this* stretch, a rule
+          //- they made elsewhere did, and they must be able to see that and change it.
+          div.resolved-note.mt-2(v-if="selectedSegment.resolved_by")
+            b {{ selectedSegment.auto_resolved ? 'Resolved by your standing rule' : 'You resolved this' }}
+            div.small {{ resolvedSummary(selectedSegment) }}
+          div.resolve.mt-2(v-if="canResolve(selectedSegment) && !compact")
+            b {{ selectedSegment.resolved_by ? 'Change this answer' : 'Resolve this overlap' }}
+            div.small.mb-2(v-if="selectedSegment.unresolved") Both devices claim this time. Pick what actually counted — once, or as a standing rule.
+            //- The 60-second rule (D15/Q1) settles a brief overlap without asking, so this
+            //- block is not shaded and not counted in "unresolved". The owner still opened
+            //- it and still saw two apps, so the button is here — it just says why it was
+            //- never asked about.
+            div.small.mb-2(v-else-if="selectedSegment.absorbed_short_contention")
+              | Too brief to ask about — overlaps under a minute settle themselves. Answer it anyway if it matters.
             //- Not "Resolve…" here either. The convention is real, but the owner
             //- read the ellipsis as a cut-off word once already, and a convention
             //- that has to be explained to the person using it has lost.
-            b-button(size="sm" variant="primary" @click="openResolve") Resolve overlap
+            b-button(size="sm" :variant="selectedSegment.unresolved ? 'primary' : 'outline-primary'" @click="openResolve")
+              | {{ selectedSegment.resolved_by ? 'Change answer' : 'Resolve overlap' }}
 
       div(v-else-if="selectedEvent")
         div.d-flex.align-items-start
@@ -282,6 +295,7 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
     :participants="resolveParticipants"
     :own-device="ownDevice"
     :device-label="deviceLabel"
+    :device-role="deviceRole"
     :format-duration="fmt"
     :clock="clock"
     @cancel="resolving = null"
@@ -322,6 +336,17 @@ interface Segment {
   state: string;
   unresolved: boolean;
   background: Slice[];
+  /** True when >=2 devices were awake but the run was under `min_contention` (D15/Q1). */
+  absorbed_short_contention: boolean;
+  /** Id of the decision that settled this block (roadmap 4.2), or null while it is still asking. */
+  resolved_by: string | null;
+  /** True when a standing rule settled it rather than an answer given for this very time (R16). */
+  auto_resolved: boolean;
+  /** True when the owner said they were away: it draws, but counts toward no total. */
+  ignored: boolean;
+  /** True when `label` is the owner's own words rather than an app name. */
+  relabelled: boolean;
+  deliberate_background: string[];
 }
 interface DeviceEvent {
   start: string;
@@ -827,6 +852,43 @@ export default Vue.extend({
     },
 
     /** Foreground first, then the background slices — the order the bands are drawn in. */
+    /**
+     * How this block stands, in three states rather than two.
+     *
+     * "Settled" used to mean *both* "one device was awake" and "you answered this" — and,
+     * confusingly, "two devices, but only for a moment". Each is a different thing to know,
+     * and the middle one is the whole point of Phase 4.
+     */
+    segmentBadge(s: Segment): { variant: string; text: string } {
+      if (s.unresolved) return { variant: 'warning', text: 'Unresolved overlap' };
+      if (s.ignored) return { variant: 'secondary', text: 'Counts as nothing' };
+      if (s.resolved_by)
+        return {
+          variant: 'success',
+          text: s.auto_resolved ? 'Resolved by rule' : 'Resolved',
+        };
+      if (s.absorbed_short_contention) return { variant: 'light', text: 'Brief overlap' };
+      return { variant: 'success', text: 'Settled' };
+    },
+    /**
+     * Is there a question here to answer? Anything with more than one activity in it, whether
+     * or not the pipeline decided to ask.
+     *
+     * Deliberately wider than `unresolved`. A block absorbed by the 60-second rule is never
+     * shaded and never counted as unresolved, but it still shows the owner two apps — and being
+     * shown two things with no way to say which was real is the confusing part.
+     */
+    canResolve(s: Segment): boolean {
+      return this.slicesOf(s).length > 1;
+    },
+    /** One line naming what the decision did, for the detail panel. */
+    resolvedSummary(s: Segment): string {
+      if (s.ignored) return 'You were away — this time counts toward no total.';
+      if (s.relabelled) return `Relabelled “${s.label}”.`;
+      const also = (s.deliberate_background || []).join(', ');
+      const counted = `${s.label} on ${this.deviceLabel(s.device)} counted.`;
+      return also ? `${counted} You meant ${also} to be running too.` : counted;
+    },
     slicesOf(s: Segment): any[] {
       return [
         { device: s.device, label: s.label, isForeground: true },
@@ -843,6 +905,17 @@ export default Vue.extend({
       return Array.from(new Set(labels)).join(' + ');
     },
 
+    /**
+     * The name a decision's signature calls this device — its hostname, falling back to the uuid.
+     *
+     * Not [[deviceLabel]], and the difference matters: a label can be a nickname typed on *this*
+     * device, or the literal words "This device". Either would make a rule that no peer can match,
+     * which is the one thing R18 forbids. A hostname is the same string on every device.
+     */
+    deviceRole(uuid: string): string {
+      const d = this.devices.find(x => x.device === uuid);
+      return (d && d.hostname) || uuid;
+    },
     deviceLabel(uuid: string): string {
       const named = this.device_names && this.device_names[uuid];
       if (named) return named;
@@ -923,14 +996,44 @@ export default Vue.extend({
       this.resolving = this.selectedSegment;
     },
     /**
-     * Roadmap 4.1 stops here on purpose. The sheet has built a complete decision
-     * record; **4.2** is the step that appends it to `decisions.jsonl` and recomputes
-     * the day. Logging it keeps the record inspectable in the meantime, and means the
-     * format is exercised before anything depends on it being right.
+     * Roadmap 4.2 — store the record and show the day it produces.
+     *
+     * There is no separate "recompute" call, by design: the pipeline applies whatever is
+     * stored, so re-reading the day *is* the recomputation. The record itself is stored
+     * verbatim; the server never rewrites it, because the copy that reaches the other
+     * device has to be byte-for-byte the same line.
      */
-    onResolved(decision: any) {
-      // eslint-disable-next-line no-console
-      console.log('[combined] decision built (roadmap 4.1; 4.2 persists it):', decision);
+    async onResolved(decision: any) {
+      const key = this.selectedKey;
+      try {
+        await getClient().req.post('/0/combined/decisions', decision);
+      } catch (e: any) {
+        this.error = e?.response?.data?.message || e?.message || 'Could not save that decision.';
+        return;
+      }
+      this.resolving = null;
+      await this.reload();
+      // `reload` clears the selection. Put it back: the owner has just answered a question
+      // about this block and the natural next thing is to see the answer on it, not an
+      // empty panel and a timeline that scrolled home.
+      this.restoreSelection(key);
+    },
+    /**
+     * Re-select the block with this key after a reload, if it is still there.
+     *
+     * It may not be: a decision can change where blocks coalesce, so the answered stretch can
+     * come back with a different start and therefore a different key. Failing silently is the
+     * right behaviour — the day is correct, and nothing is worth guessing at a neighbour.
+     */
+    restoreSelection(key: string | null) {
+      if (!key) return;
+      for (const track of this.rows as any[]) {
+        const found = (track.rows || []).find((r: any) => r.key === key);
+        if (found) {
+          this.onSelect(found.ref, key);
+          return;
+        }
+      }
     },
 
     onSelect(ref: any, key: string) {
