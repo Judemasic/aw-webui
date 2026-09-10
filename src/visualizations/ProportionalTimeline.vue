@@ -431,6 +431,22 @@ export default Vue.extend({
       return out;
     },
 
+    /**
+     * Everything that changes which minutes are on screen *without* the user
+     * scrolling: the data (via the layout's total length), the measured width, the
+     * axis, the height, and the day window itself. `viewportSignature` exists only
+     * to be watched -- see the watcher for why.
+     */
+    viewportSignature(): string {
+      return [
+        this.map.total,
+        this.containerWidth,
+        this.isVertical,
+        this.height,
+        this.windowStart,
+        this.windowEnd,
+      ].join('|');
+    },
     scrollStyle(): any {
       return {
         height: `${this.height}px`,
@@ -451,8 +467,22 @@ export default Vue.extend({
       };
     },
   },
+  watch: {
+    /**
+     * The viewport marker used to be refreshed by `onScroll` alone, so until the
+     * first scroll the parent kept its "whole day" default and the minimap drew its
+     * box across the entire day -- it only snapped to the truth once the user
+     * dragged. A freshly opened, zoomed, or re-laid-out timeline shows a real slice
+     * of the day without any scroll happening, so re-emit whenever the mapping from
+     * minute to pixel changes.
+     */
+    viewportSignature() {
+      this.$nextTick(this.emitViewport);
+    },
+  },
   mounted() {
     this.measure();
+    this.$nextTick(this.emitViewport);
     window.addEventListener('resize', this.measure);
     if (typeof ResizeObserver !== 'undefined') {
       this.ro = new ResizeObserver(this.measure);
@@ -480,7 +510,12 @@ export default Vue.extend({
       this.containerWidth = Math.max(240, Math.min(el.clientWidth, viewport));
     },
     onScroll() {
-      const el = this.$refs.scroll as HTMLElement;
+      this.emitViewport();
+    },
+    /** Tell the parent which minutes are actually on screen, for the minimap box. */
+    emitViewport() {
+      const el = this.$refs.scroll as HTMLElement | undefined;
+      if (!el) return;
       const off = this.isVertical ? el.scrollTop : el.scrollLeft;
       const win = this.isVertical ? el.clientHeight : el.clientWidth;
       this.$emit('viewport', { start: this.invert(off), end: this.invert(off + win) });

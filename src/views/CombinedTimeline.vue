@@ -227,6 +227,15 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
             :variant="selectedSegment.unresolved ? 'primary' : 'outline-primary'"
             @click="openResolve"
           ) {{ selectedSegment.resolved_by ? 'Change answer' : 'Resolve overlap' }}
+          //- Roadmap 4.3. Undo is not "change answer": it takes the question back to being
+          //- open rather than answering it differently, and there was no way to do that at
+          //- all before — a mis-tap on Resolve was permanent.
+          b-button.act(
+            v-if="selectedSegment.resolved_by"
+            variant="outline-danger"
+            :disabled="undoing"
+            @click="undoResolution(selectedSegment)"
+          ) {{ undoing ? 'Undoing…' : 'Undo' }}
           b-button.act(variant="outline-secondary" @click="detailOpen = !detailOpen")
             | {{ detailOpen ? 'Less' : 'Details' }}
 
@@ -251,6 +260,18 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
           div.resolved-note.mt-2(v-if="selectedSegment.resolved_by")
             b {{ selectedSegment.auto_resolved ? 'Resolved by your standing rule' : 'You resolved this' }}
             div.small {{ resolvedSummary(selectedSegment) }}
+            //- Roadmap 4.3 / R16. Revoking a *rule* is not a local edit — the same record
+            //- settled every block that matched it, and they all go back to asking. Say so
+            //- before the button, not in a dialog after it.
+            div.small.text-muted.mt-1(v-if="selectedSegment.auto_resolved")
+              | Undoing this drops the rule itself, so every stretch it settled goes back to asking.
+            b-button.mt-2(
+              v-if="!compact"
+              size="sm"
+              variant="outline-danger"
+              :disabled="undoing"
+              @click="undoResolution(selectedSegment)"
+            ) {{ undoing ? 'Undoing…' : (selectedSegment.auto_resolved ? 'Undo this rule' : 'Undo this answer') }}
           div.resolve.mt-2(v-if="canResolve(selectedSegment) && !compact")
             //- No heading once it is answered: the note above already says what was decided, and
             //- a "Change this answer" heading sitting next to a "Change answer" button read as a
@@ -323,6 +344,7 @@ import { mapState } from 'pinia';
 import { useSettingsStore } from '~/stores/settings';
 import { getClient } from '~/util/awclient';
 import { getColorFromString } from '~/util/color';
+import { ulid } from '~/util/ulid';
 import ProportionalTimeline from '~/visualizations/ProportionalTimeline.vue';
 import ResolutionSheet from '~/visualizations/ResolutionSheet.vue';
 
@@ -380,6 +402,8 @@ export default Vue.extend({
       selectedKey: null as string | null,
       /** The segment the resolution sheet is open on, or null. Roadmap 4.1. */
       resolving: null as Segment | null,
+      /** Roadmap 4.3 — a revoke is in flight; both Undo buttons go dead while it is. */
+      undoing: false,
       viewport: { start: 0, end: 24 * 60 },
       windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1024,
       /** Roadmap 4.1b. The ⚙ sheet holding the two fold-outs, on a compact screen. */
@@ -1019,6 +1043,40 @@ export default Vue.extend({
       // `reload` clears the selection. Put it back: the owner has just answered a question
       // about this block and the natural next thing is to see the answer on it, not an
       // empty panel and a timeline that scrolled home.
+      this.restoreSelection(key);
+    },
+    /**
+     * Roadmap 4.3 — take an answer back.
+     *
+     * A tombstone, not a delete. The decision it revokes has almost certainly been copied to
+     * the other device already, and deleting our own copy would leave theirs standing — the
+     * block would un-resolve here and re-resolve on the next sync. A tombstone travels the
+     * same way the decision did and `merge_decisions` drops the pair whichever file each
+     * arrives in, so both devices end up asking again.
+     *
+     * There is nothing to write for "make it unresolved" beyond that: the segment is only
+     * settled because a decision covers it, so removing the decision *is* the undo, and the
+     * next read of the day re-derives the shading (`04` §2.4).
+     */
+    async undoResolution(segment: Segment) {
+      if (!segment.resolved_by || this.undoing) return;
+      const key = this.selectedKey;
+      this.undoing = true;
+      try {
+        await getClient().req.post('/0/combined/decisions', {
+          id: ulid('t_'),
+          type: 'tombstone',
+          created_at: new Date().toISOString(),
+          created_by: this.ownDevice,
+          revokes: segment.resolved_by,
+        });
+      } catch (e: any) {
+        this.error = e?.response?.data?.message || e?.message || 'Could not undo that decision.';
+        return;
+      } finally {
+        this.undoing = false;
+      }
+      await this.reload();
       this.restoreSelection(key);
     },
     /**
