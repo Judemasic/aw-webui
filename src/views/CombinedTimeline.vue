@@ -252,7 +252,10 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
             b {{ selectedSegment.auto_resolved ? 'Resolved by your standing rule' : 'You resolved this' }}
             div.small {{ resolvedSummary(selectedSegment) }}
           div.resolve.mt-2(v-if="canResolve(selectedSegment) && !compact")
-            b {{ selectedSegment.resolved_by ? 'Change this answer' : 'Resolve this overlap' }}
+            //- No heading once it is answered: the note above already says what was decided, and
+            //- a "Change this answer" heading sitting next to a "Change answer" button read as a
+            //- stutter on the tablet.
+            b(v-if="!selectedSegment.resolved_by") Resolve this overlap
             div.small.mb-2(v-if="selectedSegment.unresolved") Both devices claim this time. Pick what actually counted — once, or as a standing rule.
             //- The 60-second rule (D15/Q1) settles a brief overlap without asking, so this
             //- block is not shaded and not counted in "unresolved". The owner still opened
@@ -1027,7 +1030,10 @@ export default Vue.extend({
      */
     restoreSelection(key: string | null) {
       if (!key) return;
-      for (const track of this.rows as any[]) {
+      // `tracks`, not `rows`. `rows` is the name of the *field inside* each track, and reading it
+      // off the component gave `undefined` — which threw "undefined is not iterable" the moment a
+      // decision was saved, after the day had already reloaded correctly. Caught on the tablet.
+      for (const track of this.tracks as any[]) {
         const found = (track.rows || []).find((r: any) => r.key === key);
         if (found) {
           this.onSelect(found.ref, key);
@@ -1474,7 +1480,20 @@ details.tools {
 
 .timeline-body {
   align-items: stretch;
-  flex-wrap: wrap;
+  // Owner, on the tablet in landscape: "a lot of wasted space between the end of the timeline and
+  // the details". The panel was *wrapping*. `flex-grow-1` leaves `flex-basis: auto`, and the
+  // drawing's natural width is a whole day, so the row overflowed and the 300px panel dropped
+  // below it — under the timeline's full height, which is why it took a scroll through half a
+  // screen of nothing to reach. It sits beside the drawing now, which is where a side panel that
+  // describes the thing you just tapped belongs.
+  flex-wrap: nowrap;
+
+  > :first-child {
+    flex: 1 1 0;
+    // Without this a flex item refuses to shrink below its content, which is what let the drawing
+    // push the panel off the row in the first place.
+    min-width: 0;
+  }
 }
 .combined-view.compact .timeline-body {
   // Reaching the end of the timeline must not start scrolling something else.
@@ -1483,6 +1502,10 @@ details.tools {
 .detail {
   width: 300px;
   flex: 0 0 300px;
+  // Top-aligned and self-scrolling: a short block's details should not be stretched down the whole
+  // height of the drawing, and a long source-event list should not stretch the page.
+  align-self: flex-start;
+  max-height: 100%;
   border-left: 1px solid rgba(128, 128, 128, 0.3);
   padding: 12px;
   overflow: auto;
