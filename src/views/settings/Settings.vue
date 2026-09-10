@@ -39,12 +39,23 @@ import ColorSettings from '~/views/settings/ColorSettings.vue';
 import ActivePatternSettings from '~/views/settings/ActivePatternSettings.vue';
 import PrivacyFilterSettings from '~/views/settings/PrivacyFilterSettings.vue';
 import AwNotifySettings from '~/views/settings/AwNotifySettings.vue';
+import DeviceSettings from './DeviceSettings.vue';
 
 interface Group {
   id: string;
   label: string;
   help?: string;
   components: { name: string }[];
+}
+
+/**
+ * Roadmap 4.1b-i. True only inside the Android app's WebView, where WebUIFragment
+ * installs the bridge. Checked at runtime rather than through VUE_APP_ON_ANDROID:
+ * the flag says how the bundle was built, not whether an app is on the other side.
+ */
+function hasNativeBridge(): boolean {
+  const bridge = (window as any).Android;
+  return !!(bridge && typeof bridge.openNativeSettings === 'function');
 }
 
 export default {
@@ -63,6 +74,7 @@ export default {
     ActivePatternSettings,
     PrivacyFilterSettings,
     AwNotifySettings,
+    DeviceSettings,
   },
   beforeRouteLeave(to, from, next) {
     const categoryStore = useCategoryStore();
@@ -129,7 +141,19 @@ export default {
         components: [{ name: 'AwNotifySettings' }],
       };
 
-      return [general, appearance, categorization, notifications, privacy, developer];
+      // Roadmap 4.1b-i. Only where there is an app on the other side of the WebView
+      // bridge: on a desktop aw-server serving the same bundle there is no device to
+      // settle, and an empty group in the sidebar is worse than no group.
+      const device: Group = {
+        id: 'device',
+        label: 'This device',
+        help: 'Settings that belong to the Android app rather than to the server.',
+        components: [{ name: 'DeviceSettings' }],
+      };
+
+      const groups = [general, appearance, categorization, notifications, privacy, developer];
+      if (hasNativeBridge()) groups.splice(1, 0, device);
+      return groups;
     },
   },
   async created() {
