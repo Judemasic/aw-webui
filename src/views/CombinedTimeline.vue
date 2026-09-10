@@ -892,6 +892,20 @@ export default Vue.extend({
     this.colorCache.clear();
     this.$forceUpdate();
     this.seedView(this.combined_view);
+
+    // Deep link, so another screen can hand the owner straight into answering a
+    // particular day rather than dropping them on today's and leaving them to navigate.
+    // Used by the Activity view's "N still unanswered" banner.
+    const q = this.$route.query;
+    if (typeof q.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q.date)) {
+      this.date = q.date;
+    }
+    if (q.resolve === '1' || q.resolve === 'true') {
+      this.view.resolveMode = true;
+      // The day may still be in flight; step to the first question once it lands.
+      await this.$nextTick();
+      if (this.stepIndex < 0 && this.stepRows.length) this.step(1);
+    }
   },
   updated() {
     this.measure();

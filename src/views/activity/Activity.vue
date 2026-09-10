@@ -8,8 +8,9 @@ div
   div.mb-3.text-muted(style="font-size: 0.9em;")
     ul.list-group.list-group-horizontal-md
       li.list-group-item.pl-0.pr-3.py-0.border-0
-        b.mr-1 {{ $t('activity.host') }}
-        span {{ host }}
+        b.mr-1 {{ isCombined ? $t('activity.devices') : $t('activity.host') }}
+        span(v-if="isCombined") {{ $t('activity.allDevicesCount', { count: activityStore.combined.device_count }) }}
+        span(v-else) {{ host }}
       li.list-group-item.pl-0.pr-3.py-0.border-0
         b.mr-1 {{ $t('activity.timeActive') }}
         span {{ activityStore.active.duration | friendlyduration }}
@@ -117,7 +118,27 @@ div
         b-form-select(v-model="filter_category", :options="categoryStore.category_select(true)" size="sm")
 
 
-  aw-periodusage(:periodusage_arr="periodusage", @update="setDate")
+  // The strip of neighbouring days is drawn from active *history*, which is a
+  // per-host afk query. The combined day has no equivalent yet -- it would mean one
+  // combined request per day shown -- so it is hidden rather than drawn empty.
+  aw-periodusage(v-if="!isCombined" :periodusage_arr="periodusage", @update="setDate")
+
+  // Time two devices were both awake for, that has not been answered yet, is counted
+  // *provisionally* -- the pipeline picks a winner so the day has a number at all, but
+  // that pick is a guess until the owner makes it a decision. Saying so, and offering the
+  // way through, is the honest treatment; showing the total as settled is not.
+  b-alert.mt-3.mb-0(
+    v-if="isCombined && activityStore.combined.unresolved_count > 0"
+    show
+    variant="warning"
+  )
+    div.d-flex.flex-wrap.align-items-center
+      div.mr-auto
+        b {{ $t('activity.unresolvedTitle', { count: activityStore.combined.unresolved_count }) }}
+        div.small {{ $t('activity.unresolvedHelp', { duration: unresolvedFriendly }) }}
+      b-btn.mt-2.mt-sm-0(:to="resolveLink" variant="warning" size="sm")
+        icon.mr-1(name="layer-group")
+        | {{ $t('activity.resolveNow') }}
 
   aw-uncategorized-notification(:periodLength="periodLength")
 
@@ -230,6 +251,8 @@ import { useSettingsStore } from '~/stores/settings';
 import { useCategoryStore } from '~/stores/categories';
 import { useActivityStore, QueryOptions } from '~/stores/activity';
 import { useViewsStore } from '~/stores/views';
+import { COMBINED_HOST } from '~/util/combinedActivity';
+import 'vue-awesome/icons/layer-group';
 
 export default {
   name: 'Activity',
@@ -277,6 +300,24 @@ export default {
   computed: {
     views(): import('~/stores/views').View[] {
       return this.viewsStore.viewsForHost(this.host);
+    },
+
+    /** Whether this Activity page is the every-device one rather than one machine's. */
+    isCombined(): boolean {
+      return this.host === COMBINED_HOST;
+    },
+    unresolvedFriendly(): string {
+      const secs = this.activityStore.combined.unresolved_seconds;
+      const m = Math.round(secs / 60);
+      if (m < 60) return `${m}m`;
+      return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+    },
+    /**
+     * Straight to the day in question, already in resolve mode -- not to today's
+     * timeline with the owner left to find the day and the setting themselves.
+     */
+    resolveLink(): { path: string; query: Record<string, string> } {
+      return { path: '/combined', query: { date: this._date, resolve: '1' } };
     },
     ...mapState(useSettingsStore, ['devmode']),
     ...mapState(useSettingsStore, ['always_active_pattern']),

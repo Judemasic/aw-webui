@@ -5,10 +5,12 @@ export default {
   },
   nav: {
     activity: 'Aktivitet',
+    allDevices: 'Alla enheter',
     loading: 'Läser in...',
     noActivityReports:
       'Inga aktivitetsrapporter är tillgängliga. Kontrollera att både en AFK-bevakare och en fönsterbevakare körs.',
     timeline: 'Tidslinje',
+    combined: 'Kombinerad',
     stopwatch: 'Stoppur',
     tools: 'Verktyg',
     search: 'Sök',
@@ -27,6 +29,12 @@ export default {
     madeWith: 'Skapad med',
     byDevs: 'av ActivityWatch-utvecklarna',
     host: 'Värd:',
+    devices: 'Enheter',
+    allDevicesCount: '{count} enhet(er)',
+    unresolvedTitle: '{count} överlapp fortfarande obesvarade',
+    unresolvedHelp:
+      '{duration} av dagen hade två enheter vakna samtidigt. Det räknas preliminärt tills du bestämmer.',
+    resolveNow: 'Lös',
     version: 'Version:',
     reportBug: 'Rapportera ett fel',
     askHelp: 'Be om hjälp',

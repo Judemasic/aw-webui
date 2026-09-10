@@ -27,6 +27,12 @@ import {
   mergeFullDesktopResults,
   periodsForFullDesktopQuery,
 } from '~/util/desktopQuerySplit';
+import {
+  COMBINED_HOST,
+  combinedToActivity,
+  dayBounds,
+  CombinedTimelineResponse,
+} from '~/util/combinedActivity';
 
 function timeperiodsStrsHoursOfPeriod(timeperiod: TimePeriod): string[] {
   return timeperiodsHoursOfPeriod(timeperiod).map(timeperiodToStr);
@@ -149,6 +155,21 @@ interface State {
     available: boolean;
   };
 
+  /**
+   * What the combined-across-devices query found, when that is what ran.
+   *
+   * Kept apart from the per-host fields because it answers a question none of them can:
+   * how much of the day is still *contended* and waiting on a decision. The Activity
+   * view uses it to offer a way through to resolving, rather than quietly presenting a
+   * provisional number as settled.
+   */
+  combined: {
+    active: boolean;
+    unresolved_count: number;
+    unresolved_seconds: number;
+    device_count: number;
+  };
+
   stopwatch: {
     available: boolean;
     top_stopwatches: IEvent[];
@@ -217,6 +238,13 @@ export const useActivityStore = defineStore('activity', {
 
     ios: {
       available: false,
+    },
+
+    combined: {
+      active: false,
+      unresolved_count: 0,
+      unresolved_seconds: 0,
+      device_count: 0,
     },
 
     stopwatch: {
@@ -289,9 +317,16 @@ export const useActivityStore = defineStore('activity', {
         await this.get_buckets(query_options);
 
         // TODO: These queries can actually run in parallel, but since server won't process them in parallel anyway we won't.
-        this.set_available();
+        this.set_available(query_options.host);
 
-        if (this.window.available) {
+        // The combined host is not a host: it is every device at once, answered by the
+        // server's combining pipeline rather than by a bucket query. It must be checked
+        // before `window.available`, which asks whether *this* host has window buckets
+        // and has nothing to say about the others.
+        if (query_options.host === COMBINED_HOST) {
+          console.info('Querying the combined day across all devices');
+          await this.query_combined_full(query_options);
+        } else if (this.window.available) {
           console.info(
             settingsStore.useMultidevice ? 'Querying multiple devices' : 'Querying a single device'
           );
@@ -320,7 +355,16 @@ export const useActivityStore = defineStore('activity', {
           this.query_category_time_by_period_completed();
         }
 
-        if (this.active.available) {
+        // Both of the queries below read this host's own afk/window buckets directly.
+        // The combined host has none -- its day comes from the server's pipeline, not
+        // from a bucket -- so running them would query nothing and quietly return an
+        // empty day. Answering them across every device means a combined request per
+        // period rather than one, which is worth doing but is not this step.
+        const isCombined = query_options.host === COMBINED_HOST;
+
+        if (isCombined) {
+          await this.query_active_history_completed();
+        } else if (this.active.available) {
           await this.query_active_history(query_options);
         } else if (this.android.available) {
           await this.query_active_history_android(query_options);
@@ -329,7 +373,7 @@ export const useActivityStore = defineStore('activity', {
           await this.query_active_history_completed();
         }
 
-        if (this.editor.available) {
+        if (!isCombined && this.editor.available) {
           await this.query_editor(query_options);
         } else {
           console.log('Cannot call query_editor as we do not have any editor buckets');
@@ -337,8 +381,10 @@ export const useActivityStore = defineStore('activity', {
         }
 
         // Perform this last, as it takes the longest
-        if (this.window.available || this.android.available) {
+        if (!isCombined && (this.window.available || this.android.available)) {
           await this.query_category_time_by_period(query_options);
+        } else if (isCombined) {
+          this.query_category_time_by_period_completed();
         }
       } else {
         console.warn(
@@ -410,6 +456,39 @@ export const useActivityStore = defineStore('activity', {
       this.query_browser_completed({});
       this.query_editor_completed({});
       this.query_category_time_by_period_completed({});
+    },
+
+    /**
+     * The day, across every synced device, with nothing counted twice.
+     *
+     * This is the one query that does not go through `client.query()`: the combining is
+     * done by the server's `aw-combined` pipeline and read from
+     * `GET /api/0/combined/timeline`, because deciding *which* device counts for a
+     * contended stretch is not something a query expression can express -- it depends on
+     * the owner's stored decisions (**R6**, **R18**).
+     *
+     * Note what it deliberately does *not* fill: titles, browser and editor data. The
+     * combined track carries an app label and nothing finer, so those panels are marked
+     * unavailable rather than filled with something plausible.
+     */
+    async query_combined_full({ timeperiod, date }: QueryOptions) {
+      const settingsStore = useSettingsStore();
+      const { start, end } = dayBounds(
+        date || timeperiodToStr(timeperiod).split('/')[0].slice(0, 10),
+        settingsStore.startOfDay
+      );
+      const res = await getClient().req.get('/0/combined/timeline', { params: { start, end } });
+      const categoryStore = useCategoryStore();
+      const built = combinedToActivity(res.data as CombinedTimelineResponse, categoryStore.classes);
+
+      this.query_window_completed({
+        app_events: built.app_events,
+        title_events: [],
+        cat_events: built.cat_events,
+        active_events: built.active_events,
+        duration: built.duration,
+      });
+      this.combined_completed(built);
     },
 
     async query_multidevice_full(
@@ -646,7 +725,25 @@ export const useActivityStore = defineStore('activity', {
       this.query_active_history_completed({ active_history: active_history_events });
     },
 
-    set_available(this: State) {
+    set_available(this: State, host?: string) {
+      // The combined host owns none of these buckets, because it is not a host. What it
+      // can answer is apps, categories and the day's total; what it cannot answer is
+      // titles, browser, editor and stopwatch, because the combined track carries an app
+      // label and nothing finer. Marking those unavailable is what hides their panels --
+      // showing them empty would read as "you visited no sites", which is a claim about
+      // the day rather than about the data.
+      if (host === COMBINED_HOST) {
+        this.window.available = true;
+        this.active.available = true;
+        this.category.available = true;
+        this.browser.available = false;
+        this.editor.available = false;
+        this.android.available = false;
+        this.ios.available = false;
+        this.stopwatch.available = false;
+        return;
+      }
+
       // TODO: Move to bucketStore on a per-host basis?
       this.window.available = this.buckets.afk.length > 0 && this.buckets.window.length > 0;
       this.browser.available =
@@ -785,6 +882,13 @@ export const useActivityStore = defineStore('activity', {
 
       this.active.duration = null;
 
+      // Whether the day being loaded is the combined one is decided by the query that
+      // runs, not by the one that ran last.
+      this.combined.active = false;
+      this.combined.unresolved_count = 0;
+      this.combined.unresolved_seconds = 0;
+      this.combined.device_count = 0;
+
       // Ensures that active history isn't being fully reloaded on every date change
       // (see caching done in query_active_history and query_active_history_android)
       // FIXME: Better detection of when to actually clear (such as on force reload, hostname change)
@@ -843,6 +947,16 @@ export const useActivityStore = defineStore('activity', {
 
     query_category_time_by_period_completed(this: State, { by_period } = { by_period: [] }) {
       this.category.by_period = by_period;
+    },
+
+    combined_completed(
+      this: State,
+      built = { unresolved_count: 0, unresolved_seconds: 0, device_count: 0 }
+    ) {
+      this.combined.active = true;
+      this.combined.unresolved_count = built.unresolved_count;
+      this.combined.unresolved_seconds = built.unresolved_seconds;
+      this.combined.device_count = built.device_count;
     },
   },
 });

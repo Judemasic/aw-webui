@@ -5,6 +5,7 @@ export default {
   },
   nav: {
     activity: 'Activity',
+    allDevices: 'All devices',
     loading: 'Loading...',
     noActivityReports:
       'No activity reports available. Make sure you have both an AFK and window watcher running.',
@@ -28,6 +29,12 @@ export default {
     madeWith: 'Made with',
     byDevs: 'by the ActivityWatch developers',
     host: 'Host:',
+    devices: 'Devices',
+    allDevicesCount: '{count} device(s)',
+    unresolvedTitle: '{count} overlap(s) still unanswered',
+    unresolvedHelp:
+      '{duration} of this day had two devices awake at once. It is counted provisionally until you decide.',
+    resolveNow: 'Resolve',
     version: 'Version:',
     reportBug: 'Report a bug',
     askHelp: 'Ask for help',

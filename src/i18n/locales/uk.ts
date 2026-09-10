@@ -5,10 +5,13 @@ export default {
   },
   nav: {
     activity: 'Активність',
+    allDevices: 'Усі пристрої',
     loading: 'Завантаження…',
     noActivityReports:
       'Звітів про активність немає. Переконайтеся, що запущені AFK- та window-watcher.',
     timeline: 'Хронологія',
+    combined: 'Зведено',
+    aiSummary: 'ШІ-зведення',
     stopwatch: 'Секундомір',
     tools: 'Інструменти',
     search: 'Пошук',
@@ -26,6 +29,12 @@ export default {
     madeWith: 'Зроблено з',
     byDevs: 'розробниками ActivityWatch',
     host: 'Хост:',
+    devices: 'Пристрої',
+    allDevicesCount: 'пристроїв: {count}',
+    unresolvedTitle: "нерозв'язаних перетинів: {count}",
+    unresolvedHelp:
+      '{duration} цього дня два пристрої не спали одночасно. Доки ви не вирішите, рахується попередньо.',
+    resolveNow: "Розв'язати",
     version: 'Версія:',
     reportBug: 'Повідомити про помилку',
     askHelp: 'Попросити допомогу',

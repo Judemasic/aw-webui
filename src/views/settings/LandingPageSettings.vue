@@ -6,8 +6,10 @@ div
     div
       b-select.landingpage(v-if="loaded" size="sm" :value="landingpage", @change="landingpage = $event")
         option(value="/home") Home
+        option(:value="combinedActivityPath") Activity (all devices)
         option(:value="'/activity/' + hostname + '/view/'" v-for="hostname in hostnames") Activity ({{hostname}})
         option(value="/timeline") Timeline
+        option(value="/combined") Combined timeline
       span(v-else)
         .aw-loading Loading...
   small.text-muted
@@ -17,6 +19,7 @@ div
 <script lang="ts">
 import { useSettingsStore } from '~/stores/settings';
 import { useBucketsStore } from '~/stores/buckets';
+import { COMBINED_HOST } from '~/util/combinedActivity';
 
 export default {
   name: 'LandingPageSettings',
@@ -40,6 +43,9 @@ export default {
     },
     hostnames() {
       return this.bucketsStore.hosts;
+    },
+    combinedActivityPath() {
+      return `/activity/${COMBINED_HOST}/view/`;
     },
   },
   async mounted() {

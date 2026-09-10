@@ -206,8 +206,11 @@ export default {
           available: this.activityStore.window.available || this.activityStore.android.available,
         },
         top_titles: {
+          // The combined day is the one case where apps are available and titles are
+          // not: a combined segment's label is the app name alone, because the pipeline
+          // decides *which device* counted for a stretch of time, not which window.
           title: 'Top Window Titles',
-          available: this.activityStore.window.available,
+          available: this.activityStore.window.available && !this.activityStore.combined.active,
         },
         top_bundle_ids: {
           title: 'Bundle IDs',
@@ -250,16 +253,23 @@ export default {
           available: this.activityStore.category.available,
         },
         timeline_barchart: {
+          // Needs category time bucketed by sub-period, which the combined day does not
+          // compute yet -- that means one combined request per period rather than one.
           title: 'Timeline (barchart)',
-          available: true,
+          available: !this.activityStore.combined.active,
         },
         sunburst_clock: {
+          // Reads raw window/afk events, which the combined day does not produce.
           title: 'Sunburst clock',
-          available: this.activityStore.window.available && this.activityStore.active.available,
+          available:
+            this.activityStore.window.available &&
+            this.activityStore.active.available &&
+            !this.activityStore.combined.active,
         },
         vis_timeline: {
+          // Draws this host's raw buckets directly, which the combined host has none of.
           title: 'Daily Timeline (Chronological)',
-          available: true,
+          available: !this.activityStore.combined.active,
         },
         custom_vis: {
           title: 'Custom Visualization',

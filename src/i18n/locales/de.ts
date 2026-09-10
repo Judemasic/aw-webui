@@ -5,10 +5,13 @@ export default {
   },
   nav: {
     activity: 'Aktivität',
+    allDevices: 'Alle Geräte',
     loading: 'Laden…',
     noActivityReports:
       'Keine Aktivitätsberichte verfügbar. Stellen Sie sicher, dass AFK- und Fenster-Watcher laufen.',
     timeline: 'Zeitleiste',
+    combined: 'Kombiniert',
+    aiSummary: 'KI-Zusammenfassung',
     stopwatch: 'Stoppuhr',
     tools: 'Werkzeuge',
     search: 'Suche',
@@ -26,6 +29,12 @@ export default {
     madeWith: 'Gemacht mit',
     byDevs: 'von den ActivityWatch-Entwicklern',
     host: 'Host:',
+    devices: 'Geräte',
+    allDevicesCount: '{count} Gerät(e)',
+    unresolvedTitle: '{count} Überschneidung(en) noch offen',
+    unresolvedHelp:
+      '{duration} dieses Tages waren zwei Geräte gleichzeitig wach. Bis zu Ihrer Entscheidung wird vorläufig gezählt.',
+    resolveNow: 'Auflösen',
     version: 'Version:',
     reportBug: 'Fehler melden',
     askHelp: 'Hilfe anfordern',

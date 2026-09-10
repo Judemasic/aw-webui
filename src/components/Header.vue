@@ -12,23 +12,22 @@ div(:class="{'fixed-top-padding': fixedTopMenu}")
 
     b-collapse#nav-collapse(is-nav)
       b-navbar-nav
-        // If only a single view (the default) is available
-        b-nav-item(v-if="activityViews && activityViews.length === 1", v-for="view in activityViews", :key="view.name", :to="view.pathUrl")
-          div.px-2.px-lg-1
-            icon(name="calendar-day")
-            | {{ $t('nav.activity') }}
-
-        // If multiple (or no) activity views are available
-        b-nav-item-dropdown(v-if="!activityViews || activityViews.length !== 1")
+        // Activity now means "across every device" by default -- the owner asked for the
+        // combined day to *be* Activity rather than sit beside it as a fifth tab, because
+        // the nav had no room for another. The per-device views are still here, one level
+        // down, exactly as they were.
+        b-nav-item-dropdown
           template(slot="button-content")
             div.d-inline.px-2.px-lg-1
               icon(name="calendar-day")
               | {{ $t('nav.activity') }}
+          b-dropdown-item(:to="combinedActivityUrl")
+            icon(name="layer-group")
+            | {{ $t('nav.allDevices') }}
+          b-dropdown-divider(v-if="activityViews && activityViews.length > 0")
           b-dropdown-item(v-if="activityViews === null", disabled)
             span.text-muted {{ $t('nav.loading') }}
             br
-          b-dropdown-item(v-else-if="activityViews && activityViews.length <= 0", disabled)
-            | {{ $t('nav.noActivityReports') }}
           b-dropdown-item(v-for="view in activityViews", :key="view.name", :to="view.pathUrl")
             icon(:name="view.icon")
             | {{ view.name }}
@@ -141,6 +140,7 @@ import { mapState } from 'pinia';
 import { useSettingsStore } from '~/stores/settings';
 import { useBucketsStore } from '~/stores/buckets';
 import { IBucket } from '~/util/interfaces';
+import { COMBINED_HOST } from '~/util/combinedActivity';
 
 export default {
   name: 'Header',
@@ -156,6 +156,9 @@ export default {
   },
   computed: {
     ...mapState(useSettingsStore, ['devmode']),
+    combinedActivityUrl() {
+      return `/activity/${COMBINED_HOST}`;
+    },
   },
   mounted: async function () {
     const bucketStore = useBucketsStore();
