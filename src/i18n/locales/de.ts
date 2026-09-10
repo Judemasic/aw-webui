@@ -129,6 +129,9 @@ export default {
     categorization: {
       title: 'Kategorisierung',
       restoreDefaults: 'Standard wiederherstellen',
+      mutedPalette: 'Gedeckte Farben',
+      mutedPaletteHelp:
+        'Färbt jede Kategorie mit eigener Farbe auf die gemeinsame Palette der App um. Ihre Regeln bleiben unberührt.',
       rulesHelp:
         'Regeln zur Kategorisierung von Ereignissen. Ein Ereignis hat nur eine Kategorie. Bei mehreren Treffern wird die tiefste gewählt.',
       builderIntro: 'Sie können den',

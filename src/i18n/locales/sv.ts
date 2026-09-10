@@ -130,6 +130,9 @@ export default {
     categorization: {
       title: 'Kategorisering',
       restoreDefaults: 'Återställ standardvärden',
+      mutedPalette: 'Dämpade färger',
+      mutedPaletteHelp:
+        'Målar om varje kategori som har en egen färg till appens gemensamma palett. Dina regler rörs inte.',
       rulesHelp:
         'Regler för kategorisering av händelser. En händelse kan bara tillhöra en kategori. Om flera kategorier matchar väljs den mest specifika.',
       builderIntro: 'Du kan använda',

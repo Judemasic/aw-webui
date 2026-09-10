@@ -14,7 +14,7 @@ div
         icon(name="sync" scale="1")
 
   div(style="position: relative")
-    picker(:value="colors" @input="updateFromPicker" v-if="displayPicker")
+    picker(:value="colors" :palette="palette" @input="updateFromPicker" v-if="displayPicker")
 </template>
 
 <style>
@@ -37,6 +37,7 @@ div
 import 'vue-awesome/icons/sync';
 
 import { Compact } from 'vue-color';
+import { MUTED_PALETTE, randomMutedColor } from '~/util/palette';
 
 export default {
   components: {
@@ -50,6 +51,10 @@ export default {
       },
       colorValue: '',
       displayPicker: false,
+      // The swatches offered. Overrides vue-color's own (fully saturated) default set
+      // so that picking a category colour by clicking, rather than by typing a hex,
+      // keeps it in the same family as everything else the app draws.
+      palette: MUTED_PALETTE,
     };
   },
   watch: {
@@ -109,7 +114,10 @@ export default {
       }
     },
     randomColor() {
-      this.colorValue = '#' + (0x1000000 + Math.random() * 0xffffff).toString(16).substr(1, 6);
+      // Randomise within the palette, not across all 16.7 million hexes. The old
+      // version was the main reason a category ended up a colour nothing else in the
+      // app would ever produce.
+      this.colorValue = randomMutedColor();
     },
     documentClick(e) {
       const el = this.$refs.colorpicker;

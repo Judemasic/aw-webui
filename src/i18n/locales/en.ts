@@ -130,6 +130,9 @@ export default {
     categorization: {
       title: 'Categorization',
       restoreDefaults: 'Restore defaults',
+      mutedPalette: 'Muted colours',
+      mutedPaletteHelp:
+        "Repaint every category that has its own colour onto the app's shared palette. Your rules are not touched.",
       rulesHelp:
         'Rules for categorizing events. An event can only have one category. If several categories match, the deepest one will be chosen.',
       builderIntro: 'You can use the',

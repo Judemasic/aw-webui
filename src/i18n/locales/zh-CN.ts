@@ -114,6 +114,9 @@ export default {
     categorization: {
       title: '分类',
       restoreDefaults: '恢复默认值',
+      mutedPalette: '柔和配色',
+      mutedPaletteHelp:
+        '将所有设置了自身颜色的分类重新着色为应用的共享调色板。不会改动你的规则。',
       rulesHelp:
         '用于给事件分类的规则。一个事件只能属于一个分类。如果多个分类匹配，将选择最深层的分类。',
       builderIntro: '你可以使用',

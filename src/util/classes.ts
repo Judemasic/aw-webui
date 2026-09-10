@@ -2,6 +2,7 @@ import _ from 'lodash';
 import { IEvent } from './interfaces';
 import { useSettingsStore } from '~/stores/settings';
 import { getPresetCategorySets } from '~/util/presetCategories';
+import { MUTED, COLOR_UNCAT } from '~/util/palette';
 
 const level_sep = '>';
 export const CLASSIFY_KEYS = ['app', 'title'] as const;
@@ -72,15 +73,18 @@ export function mergeCategorySets(sets: CategorySet[]): Category[] {
   return merged;
 }
 
-const COLOR_UNCAT = '#CCC';
-
 // The default categories
+//
+// Colours come from `~/util/palette` — the same Material 200 tier the app-name hash
+// draws from — so a category and an app look like they belong to one application
+// rather than two. See the header of that file for why.
+//
 // Should be run through createMissingParents before being used in most cases.
 export const defaultCategories: Category[] = [
   {
     name: ['Work'],
     rule: { type: 'regex', regex: 'Google Docs|libreoffice|ReText' },
-    data: { color: '#0F0', score: 10 },
+    data: { color: MUTED.green, score: 10 },
   },
   {
     name: ['Work', 'Programming'],
@@ -100,17 +104,17 @@ export const defaultCategories: Category[] = [
   {
     name: ['Media'],
     rule: { type: 'none' },
-    data: { color: '#F33' },
+    data: { color: MUTED.red },
   },
   {
     name: ['Media', 'Games'],
     rule: { type: 'regex', regex: 'Minecraft|RimWorld' },
-    data: { color: '#F80' },
+    data: { color: MUTED.orange },
   },
   {
     name: ['Media', 'Video'],
     rule: { type: 'regex', regex: 'YouTube|Plex|VLC' },
-    data: { color: '#F33' },
+    data: { color: MUTED.red },
   },
   {
     name: ['Media', 'Social Media'],
@@ -119,7 +123,7 @@ export const defaultCategories: Category[] = [
       regex: 'reddit|Facebook|Twitter|Instagram|devRant',
       ignore_case: true,
     },
-    data: { color: '#FCC400' },
+    data: { color: MUTED.amber },
   },
   {
     name: ['Media', 'Music'],
@@ -128,12 +132,12 @@ export const defaultCategories: Category[] = [
       regex: 'Spotify|Deezer',
       ignore_case: true,
     },
-    data: { color: '#A8FC00' },
+    data: { color: MUTED.lime },
   },
   {
     name: ['Comms'],
     rule: { type: 'none' },
-    data: { color: '#9FF' },
+    data: { color: MUTED.cyan },
   },
   {
     name: ['Comms', 'IM'],

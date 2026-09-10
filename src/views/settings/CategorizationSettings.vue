@@ -39,6 +39,8 @@ div
   div.d-flex.align-items-center.flex-wrap.mt-4
     h5.mb-0 {{ $t('settings.categorization.categories') }}
     div.ml-auto
+      b-btn.ml-1(@click="applyMutedPalette", variant="outline-secondary" size="sm" :title="$t('settings.categorization.mutedPaletteHelp')")
+        | {{ $t('settings.categorization.mutedPalette') }}
       b-btn.ml-1(@click="restoreDefaultClasses", variant="outline-warning" size="sm")
         icon(name="undo")
         | {{ $t('settings.categorization.restoreDefaults') }}
@@ -112,6 +114,7 @@ import { useCategoryStore } from '~/stores/categories';
 
 import { downloadFile } from '~/util/export';
 import { parseCategoryImport, shouldAttemptJsonImport } from '~/util/importFile';
+import { nextUnusedMutedColor, recolorOntoPalette } from '~/util/palette';
 
 export default {
   name: 'CategorizationSettings',
@@ -165,11 +168,29 @@ export default {
   },
   methods: {
     addClass: function () {
+      // Give it a colour up front. A new category used to arrive with none, which
+      // renders as the same "uncategorized" grey as everything else without one, so a
+      // freshly added category was invisible in every chart until its colour was set
+      // by hand. Picking the first free palette entry also means two new categories
+      // never collide.
+      const used = this.categoryStore.classes
+        .map((c: any) => c.data && c.data.color)
+        .filter(Boolean);
       const lastId = this.categoryStore.addClass({
         name: ['New class'],
         rule: { type: 'regex', regex: 'FILL ME' },
+        data: { color: nextUnusedMutedColor(used) },
       });
       this.editingId = lastId;
+    },
+    applyMutedPalette: function () {
+      // Repaints the categories that carry their own colour onto the shared palette.
+      // Deliberately a separate button from "Restore defaults": that one throws the
+      // owner's rules away, and this one must not touch them.
+      const changed = recolorOntoPalette(this.categoryStore.classes as any);
+      if (changed > 0) {
+        this.categoryStore.classes_unsaved_changes = true;
+      }
     },
     saveClasses: async function () {
       try {

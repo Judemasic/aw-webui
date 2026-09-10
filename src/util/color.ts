@@ -3,14 +3,17 @@ import { Category, matchString, loadClasses } from './classes';
 import Color from 'color';
 import * as d3 from 'd3';
 import { IEvent, IBucket } from './interfaces';
+import { APP_HASH_SCALE, COLOR_UNCAT } from './palette';
 
 // See here for examples:
 //   https://bl.ocks.org/pstuffa/3393ff2711a53975040077b7453781a9
 //
 
-const COLOR_UNCAT = '#CCC';
+// Re-exported because plenty of callers import COLOR_UNCAT from here; the definition
+// itself now lives in `palette.ts` alongside the colours it has to sit next to.
+export { COLOR_UNCAT };
 
-const scale = d3.scaleOrdinal(['#90CAF9', '#FFE082', '#EF9A9A', '#A5D6A7']);
+const scale = d3.scaleOrdinal(APP_HASH_SCALE);
 
 // Needed to prewarm the color table
 scale.domain(
