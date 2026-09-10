@@ -251,7 +251,7 @@ import { useSettingsStore } from '~/stores/settings';
 import { useCategoryStore } from '~/stores/categories';
 import { useActivityStore, QueryOptions } from '~/stores/activity';
 import { useViewsStore } from '~/stores/views';
-import { COMBINED_HOST } from '~/util/combinedActivity';
+import { COMBINED_HOST, viewHasCombinedContent } from '~/util/combinedActivity';
 import 'vue-awesome/icons/layer-group';
 
 export default {
@@ -299,7 +299,12 @@ export default {
   },
   computed: {
     views(): import('~/stores/views').View[] {
-      return this.viewsStore.viewsForHost(this.host);
+      const views = this.viewsStore.viewsForHost(this.host);
+      // On the combined day, a tab whose every panel would read "(no data)" is worse
+      // than no tab -- it invites a tap that leads nowhere. Browser and Editor are
+      // exactly that, because a combined segment carries an app name and nothing finer.
+      if (this.host === COMBINED_HOST) return views.filter(viewHasCombinedContent);
+      return views;
     },
 
     /** Whether this Activity page is the every-device one rather than one machine's. */

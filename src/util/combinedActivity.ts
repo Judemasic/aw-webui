@@ -155,3 +155,44 @@ export function dayBounds(date: string, startOfDay: string): { start: string; en
     .add(m || 0, 'minutes');
   return { start: start.toISOString(), end: start.clone().add(1, 'day').toISOString() };
 }
+
+/**
+ * Visualizations the combined day cannot answer.
+ *
+ * Two different reasons, both permanent-ish rather than unimplemented:
+ *
+ *  - **A combined segment's label is the app name alone.** The pipeline decides which
+ *    *device* counted for a stretch of time, not which window, so titles, browser
+ *    domains/URLs and editor files have no combined answer at all.
+ *  - **Some visualizations read a host's raw buckets directly** (the sunburst clock, the
+ *    chronological timeline), and the combined host owns no buckets.
+ *
+ * `timeline_barchart` is here for a third and softer reason: it needs category time
+ * bucketed per sub-period, which means one combined request per period rather than one.
+ * That is worth building; it is just not built.
+ *
+ * Shared between the visualization's own availability flag and the view-tab filter, so a
+ * tab whose every panel would say "(no data)" does not appear at all — three dead tabs is
+ * exactly the "too much on the UI" the combined view exists to avoid.
+ */
+export const COMBINED_UNAVAILABLE_TYPES = new Set([
+  'top_titles',
+  'top_bundle_ids',
+  'top_domains',
+  'top_urls',
+  'top_browser_titles',
+  'top_editor_files',
+  'top_editor_languages',
+  'top_editor_projects',
+  'top_stopwatches',
+  'sunburst_clock',
+  'vis_timeline',
+  'timeline_barchart',
+]);
+
+/** Whether a view has anything at all to show on the combined day. */
+export function viewHasCombinedContent(view: { elements?: { type: string }[] }): boolean {
+  const els = view?.elements || [];
+  if (els.length === 0) return true; // an empty view is the owner's to fill
+  return els.some(e => !COMBINED_UNAVAILABLE_TYPES.has(e.type));
+}

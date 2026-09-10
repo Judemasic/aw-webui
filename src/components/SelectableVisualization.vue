@@ -123,6 +123,7 @@ import 'vue-awesome/icons/times';
 import 'vue-awesome/icons/bars';
 
 import { buildBarchartDataset } from '~/util/datasets';
+import { COMBINED_UNAVAILABLE_TYPES } from '~/util/combinedActivity';
 
 // TODO: Move this somewhere else
 import { build_category_hierarchy } from '~/util/classes';
@@ -206,11 +207,8 @@ export default {
           available: this.activityStore.window.available || this.activityStore.android.available,
         },
         top_titles: {
-          // The combined day is the one case where apps are available and titles are
-          // not: a combined segment's label is the app name alone, because the pipeline
-          // decides *which device* counted for a stretch of time, not which window.
           title: 'Top Window Titles',
-          available: this.activityStore.window.available && !this.activityStore.combined.active,
+          available: this.activityStore.window.available && this.combinedAllows('top_titles'),
         },
         top_bundle_ids: {
           title: 'Bundle IDs',
@@ -253,23 +251,19 @@ export default {
           available: this.activityStore.category.available,
         },
         timeline_barchart: {
-          // Needs category time bucketed by sub-period, which the combined day does not
-          // compute yet -- that means one combined request per period rather than one.
           title: 'Timeline (barchart)',
-          available: !this.activityStore.combined.active,
+          available: this.combinedAllows('timeline_barchart'),
         },
         sunburst_clock: {
-          // Reads raw window/afk events, which the combined day does not produce.
           title: 'Sunburst clock',
           available:
             this.activityStore.window.available &&
             this.activityStore.active.available &&
-            !this.activityStore.combined.active,
+            this.combinedAllows('sunburst_clock'),
         },
         vis_timeline: {
-          // Draws this host's raw buckets directly, which the combined host has none of.
           title: 'Daily Timeline (Chronological)',
-          available: !this.activityStore.combined.active,
+          available: this.combinedAllows('vis_timeline'),
         },
         custom_vis: {
           title: 'Custom Visualization',
@@ -312,6 +306,16 @@ export default {
       } else {
         return null;
       }
+    },
+    /**
+     * False when this visualization has no answer on the combined day.
+     *
+     * The list of which ones lives beside the adapter that builds the combined day, so
+     * the panel's availability flag and the view-tab filter cannot drift apart.
+     */
+    combinedAllows() {
+      return (type: string): boolean =>
+        !this.activityStore.combined.active || !COMBINED_UNAVAILABLE_TYPES.has(type);
     },
     datasets: function () {
       // Return empty array if not loaded
