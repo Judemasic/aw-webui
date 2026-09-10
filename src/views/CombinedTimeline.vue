@@ -814,8 +814,12 @@ export default Vue.extend({
       return moment(iso).format('HH:mm');
     },
     fmt(minutes: number): string {
-      const h = Math.floor(minutes / 60);
-      const m = Math.round(minutes % 60);
+      // Round the total, then split it. Flooring the hours and rounding the
+      // remainder separately makes 299.6 minutes read "4h 60m", which is what the
+      // tablet showed on a real day -- floor(4.99) is 4 and round(59.6) is 60.
+      const total = Math.round(minutes);
+      const h = Math.floor(total / 60);
+      const m = total % 60;
       return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
     },
     colorFor(label: string): string {

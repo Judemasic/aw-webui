@@ -151,9 +151,12 @@ export default Vue.extend({
     selectedKey: { type: String, default: null },
     formatDuration: {
       type: Function as PropType<(minutes: number) => string>,
+      // Same carry bug as CombinedTimeline.fmt had: round the total, then split it,
+      // or 299.6 minutes prints as "4h 60m".
       default: (m: number) => {
-        const h = Math.floor(m / 60);
-        const mm = Math.round(m % 60);
+        const total = Math.round(m);
+        const h = Math.floor(total / 60);
+        const mm = total % 60;
         return h ? `${h}h ${String(mm).padStart(2, '0')}m` : `${mm}m`;
       },
     },
