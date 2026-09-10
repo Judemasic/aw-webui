@@ -78,6 +78,7 @@ div.pt-root(ref="root")
 // takes generic tracks so roadmap 5.5b can reuse it for the plain Timeline.
 
 import Vue from 'vue';
+import { hourTicksFor } from '~/util/time';
 import type { PropType } from 'vue';
 
 /** One drawn block. `bands` splits it when several things ran at once. */
@@ -141,6 +142,16 @@ export default Vue.extend({
      * in step with the gesture.
      */
     pxPerHour: { type: Number, default: 64 },
+    /**
+     * Wall-clock time at minute 0 of the window, as `HH:mm`.
+     *
+     * The axis counts minutes from the start of the *window*, not from midnight, so
+     * without this the hour labels are simply wrong whenever a day does not start at
+     * midnight -- and with the app's default `Start of day` of 04:00, that is always.
+     * Ticks are placed on real hour boundaries rather than every 60 minutes from the
+     * window's start, so a half-hour offset still labels :00 and not :30.
+     */
+    startClock: { type: String, default: '00:00' },
     /**
      * Scale the whole window to the viewport so the time axis never scrolls.
      * Overrides `pxPerHour`. A manual zoom gesture emits `update:fit` false so the
@@ -291,17 +302,18 @@ export default Vue.extend({
 
     ticks(): any[] {
       const out = [];
-      const startH = Math.floor(this.windowStart / 60);
-      const endH = Math.ceil(this.windowEnd / 60);
+      const { firstTick, labelFor } = hourTicksFor(this.startClock);
+      const startH = Math.floor((this.windowStart - firstTick) / 60);
+      const endH = Math.ceil((this.windowEnd - firstTick) / 60);
       for (let h = startH; h <= endH; h++) {
-        const t = h * 60;
+        const t = h * 60 + firstTick;
         if (t < this.windowStart || t > this.windowEnd) continue;
         // A tick inside a collapsed stub would sit at a meaningless position.
         if (this.map.spans.some(s => s.quiet && t > s.t0 && t < s.t1)) continue;
         const d = this.map.pos(t);
         out.push({
           t,
-          label: String(h % 24).padStart(2, '0'),
+          label: labelFor(t),
           labelStyle: this.isVertical
             ? {
                 top: `${d}px`,

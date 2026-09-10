@@ -215,6 +215,7 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
       :fit.sync="view.fit"
       :collapse-quiet="view.collapseQuiet"
       :show-secondary="view.deviceTracks"
+      :start-clock="startOfDay"
       :window-start="windowStart"
       :window-end="windowEnd"
       :bottom-inset="bottomInset"
@@ -387,6 +388,7 @@ import moment from 'moment';
 import { mapState } from 'pinia';
 import { useSettingsStore } from '~/stores/settings';
 import { useCategoryStore } from '~/stores/categories';
+import { get_day_start_with_offset } from '~/util/time';
 import { getClient } from '~/util/awclient';
 import { getCategoryColorForLabel } from '~/util/color';
 import { ulid } from '~/util/ulid';
@@ -535,9 +537,16 @@ export default Vue.extend({
     };
   },
   computed: {
-    ...mapState(useSettingsStore, ['device_names', 'combined_view']),
+    ...mapState(useSettingsStore, ['device_names', 'combined_view', 'startOfDay']),
     dayStart(): moment.Moment {
-      return moment(this.date).startOf('day');
+      // Honour the owner's `Start of day`, like Activity, the Timeline and the day nav
+      // all do. This used to be a plain `startOf('day')`, which meant Combined was
+      // quietly showing a *different day* from every other screen -- with the default
+      // 04:00 offset the two windows were four hours apart, so the same date reported a
+      // different total and a different number of unanswered overlaps depending on where
+      // it was read. See dayBounds in util/combinedActivity, which is the same rule for
+      // the request Activity makes.
+      return moment(get_day_start_with_offset(moment(this.date), this.startOfDay));
     },
     isToday(): boolean {
       return this.date >= moment().format('YYYY-MM-DD');

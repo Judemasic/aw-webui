@@ -20,6 +20,7 @@
 import moment from 'moment';
 import { IEvent } from '~/util/interfaces';
 import { Category, matchString } from '~/util/classes';
+import { get_day_start_with_offset } from '~/util/time';
 
 /**
  * The `:host` value that means "every device at once".
@@ -146,13 +147,21 @@ export function combinedToActivity(
   };
 }
 
-/** The day's UTC bounds for a `YYYY-MM-DD` and a start-of-day offset like `04:00`. */
+/**
+ * The day's bounds for a `YYYY-MM-DD`, honouring the owner's start-of-day offset.
+ *
+ * Every screen in the app has to agree on where a day begins, or the same day shows two
+ * different totals depending on which screen is asked. The Combined timeline used
+ * `moment(date).startOf('day')` -- plain midnight -- while Activity, the Timeline and the
+ * day nav all honour the `Start of day` setting, so with the owner's 04:00 the two
+ * screens were asking for windows four hours apart and disagreeing about the day by
+ * roughly half an hour of activity and two unanswered overlaps.
+ *
+ * Midnight is also the wrong answer on its own terms: the setting exists because a
+ * session that runs past midnight belongs to the evening it started in.
+ */
 export function dayBounds(date: string, startOfDay: string): { start: string; end: string } {
-  const [h, m] = (startOfDay || '00:00').split(':').map(Number);
-  const start = moment(date, 'YYYY-MM-DD')
-    .startOf('day')
-    .add(h || 0, 'hours')
-    .add(m || 0, 'minutes');
+  const start = moment(get_day_start_with_offset(moment(date, 'YYYY-MM-DD'), startOfDay));
   return { start: start.toISOString(), end: start.clone().add(1, 'day').toISOString() };
 }
 

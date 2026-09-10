@@ -113,8 +113,19 @@ describe('dayBounds', () => {
     expect(new Date(start).getHours()).toBe(4);
   });
 
-  it('defaults to midnight when no offset is given', () => {
-    expect(new Date(dayBounds('2026-09-10', '').start).getHours()).toBe(0);
+  it('starts a day at the offset, not at midnight', () => {
+    // The bug this exists to stop: Combined used a plain startOf('day') while Activity
+    // used the offset, so the same date meant two different 24-hour windows and the two
+    // screens disagreed about the day's total and its unanswered count.
+    expect(new Date(dayBounds('2026-09-10', '06:30').start).getHours()).toBe(6);
+    expect(new Date(dayBounds('2026-09-10', '06:30').start).getMinutes()).toBe(30);
+  });
+
+  it('spans exactly one day whatever the offset', () => {
+    for (const off of ['00:00', '03:00', '04:00', '12:00', '23:00']) {
+      const { start, end } = dayBounds('2026-09-10', off);
+      expect(new Date(end).getTime() - new Date(start).getTime()).toBe(24 * 3600 * 1000);
+    }
   });
 });
 

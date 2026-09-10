@@ -138,3 +138,33 @@ export function format_time_of_day(date: Date | string, locale?: string | string
     second: '2-digit',
   }).format(d);
 }
+
+/**
+ * Where the hour ticks go on a timeline whose minute 0 is not midnight.
+ *
+ * A day axis counts minutes from the start of the *window*. When the window starts at
+ * the owner's `Start of day` -- 04:00 by default -- labelling tick *n* as hour *n* is
+ * simply wrong, and ticks placed every 60 minutes from the start land at :30 past the
+ * hour whenever the offset has minutes in it.
+ *
+ * So: `firstTick` is the first real hour boundary inside the window, and `labelFor`
+ * gives the wall-clock hour at any tick.
+ */
+export function hourTicksFor(startClock: string): {
+  firstTick: number;
+  labelFor: (t: number) => string;
+} {
+  // Read the parts separately rather than destructuring a mapped split: a string with
+  // no colon yields a one-element array, which leaves the minutes `undefined` and turns
+  // every number downstream into NaN -- and a NaN tick renders as the label "NaN".
+  const parts = String(startClock || '00:00').split(':');
+  const sh = parseInt(parts[0], 10) || 0;
+  const sm = parseInt(parts[1], 10) || 0;
+  const skew = ((sm % 60) + 60) % 60;
+  const firstTick = (60 - skew) % 60;
+  return {
+    firstTick,
+    labelFor: (t: number) =>
+      String((((sh + Math.ceil((t + skew) / 60)) % 24) + 24) % 24).padStart(2, '0'),
+  };
+}
