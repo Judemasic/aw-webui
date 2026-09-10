@@ -134,13 +134,12 @@ import 'vue-awesome/icons/ellipsis-h';
 import 'vue-awesome/icons/mobile';
 import 'vue-awesome/icons/desktop';
 
-import _ from 'lodash';
-
 import { mapState } from 'pinia';
 import { useSettingsStore } from '~/stores/settings';
 import { useBucketsStore } from '~/stores/buckets';
 import { IBucket } from '~/util/interfaces';
 import { COMBINED_HOST } from '~/util/combinedActivity';
+import { activityViewsFromBuckets } from '~/util/hostnames';
 
 export default {
   name: 'Header',
@@ -163,39 +162,10 @@ export default {
   mounted: async function () {
     const bucketStore = useBucketsStore();
     await bucketStore.ensureLoaded();
-    const buckets: IBucket[] = bucketStore.buckets;
-    const types_by_host = {};
-
-    const activityViews = [];
-
-    _.each(buckets, v => {
-      types_by_host[v.hostname] = types_by_host[v.hostname] || {};
-      types_by_host[v.hostname].afk ||= v.type == 'afkstatus';
-      types_by_host[v.hostname].window ||= v.type == 'currentwindow';
-      types_by_host[v.hostname].android ||= v.type == 'currentwindow' && v.id.includes('android');
-    });
-
-    _.each(types_by_host, (types, hostname) => {
-      if (types['android']) {
-        activityViews.push({
-          name: `${hostname} (Android)`,
-          hostname: hostname,
-          type: 'android',
-          pathUrl: `/activity/${hostname}`,
-          icon: 'mobile',
-        });
-      } else if (hostname != 'unknown') {
-        activityViews.push({
-          name: hostname,
-          hostname: hostname,
-          type: 'default',
-          pathUrl: `/activity/${hostname}`,
-          icon: 'desktop',
-        });
-      }
-    });
-
-    this.activityViews = activityViews;
+    // The rule for which hosts appear lives in a util so it can be tested without
+    // mounting the navbar -- see activityViewsFromBuckets for why "has any bucket" was
+    // the wrong rule.
+    this.activityViews = activityViewsFromBuckets(bucketStore.buckets as IBucket[]);
   },
 };
 </script>
