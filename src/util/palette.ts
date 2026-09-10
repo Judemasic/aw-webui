@@ -121,6 +121,92 @@ export function nextUnusedMutedColor(used: string[]): string {
 }
 
 /**
+ * Hue in degrees, plus how colourful it is.
+ *
+ * Accepts the short form as well as the long one — `#0F0` is not a curiosity here, it
+ * is what the shipped category defaults are actually written in (`#0F0`, `#F33`, `#9FF`,
+ * `#CCC`), so a parser that only took `#RRGGBB` would read every one of them as black
+ * and send the whole set to the neutrals.
+ */
+function hueOf(hex: string): { hue: number; chroma: number } {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return { hue: 0, chroma: 0 };
+  const digits =
+    m[1].length === 3
+      ? m[1]
+          .split('')
+          .map(d => d + d)
+          .join('')
+      : m[1];
+  const n = parseInt(digits, 16);
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const chroma = max - min;
+  if (chroma === 0) return { hue: 0, chroma: 0 };
+  let hue: number;
+  if (max === r) hue = ((g - b) / chroma) % 6;
+  else if (max === g) hue = (b - r) / chroma + 2;
+  else hue = (r - g) / chroma + 4;
+  hue = hue * 60;
+  return { hue: hue < 0 ? hue + 360 : hue, chroma };
+}
+
+/** Shortest distance between two hues on the colour wheel, 0-180. */
+function hueDistance(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+/**
+ * Below this much colourfulness, a colour is a grey rather than a hue.
+ *
+ * The palette splits cleanly here: its sixteen hues run from 0.19 (Green 200) to 0.50
+ * (Orange 200), while its two neutrals sit at 0.08 (Blue Grey) and 0.09 (Brown). The
+ * Material 200 tier is pale by design, so a threshold set for full-strength colours
+ * would call half the palette grey.
+ */
+const NEUTRAL_CHROMA = 0.15;
+
+/** The palette's own hues, computed once. */
+const PALETTE_HUES = MUTED_PALETTE.map(hueOf);
+
+/**
+ * The palette entry closest in hue to `hex`, skipping any already `taken`.
+ *
+ * Hue is what a colour *means* to whoever chose it — green was picked because it reads
+ * as green — so a repaint that turns green into red has not toned a category down, it
+ * has renamed it. Matching on hue keeps every category recognisably itself and changes
+ * only how loud it is.
+ */
+export function nearestMutedColor(hex: string, taken: Set<string> = new Set()): string {
+  const { hue, chroma } = hueOf(hex);
+  const free = MUTED_PALETTE.map((c, i) => i).filter(i => !taken.has(MUTED_PALETTE[i]));
+  const pool = free.length ? free : MUTED_PALETTE.map((_c, i) => i);
+
+  // A grey has no hue to preserve, so it becomes the palette's own neutral.
+  if (chroma < NEUTRAL_CHROMA) {
+    const neutral = pool.filter(i => PALETTE_HUES[i].chroma < NEUTRAL_CHROMA);
+    return MUTED_PALETTE[(neutral.length ? neutral : pool)[0]];
+  }
+
+  let best = pool[0];
+  let bestDist = Infinity;
+  for (const i of pool) {
+    // Never answer a hue with a near-grey; browns and blue-greys are for greys.
+    const penalty = PALETTE_HUES[i].chroma < NEUTRAL_CHROMA ? 180 : 0;
+    const dist = hueDistance(hue, PALETTE_HUES[i].hue) + penalty;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = i;
+    }
+  }
+  return MUTED_PALETTE[best];
+}
+
+/**
  * Re-colour an existing set of categories onto the palette.
  *
  * Changing `defaultCategories` only reaches a *fresh* install — anyone who has ever
@@ -135,19 +221,23 @@ export function nextUnusedMutedColor(used: string[]): string {
  *  - **`Uncategorized` keeps its grey.** It is not a category so much as the absence of
  *    one, and it is grey everywhere else in the app for that reason.
  *
- * Colours are handed out in palette order, so the result reads as a spectrum rather
- * than as a re-shuffle.
+ *  - **Hue is preserved.** Each colour is answered by the palette entry closest to it on
+ *    the colour wheel, so a green category stays green and a red one stays red — only
+ *    the loudness changes. Handing colours out in palette order instead was tried first
+ *    and was plainly wrong on hardware: it turned `Work` from green to red, which is not
+ *    toning a category down, it is renaming it. Two categories never land on the same
+ *    entry while unused ones remain.
  */
 export function recolorOntoPalette<T extends { name: string[]; data?: { color?: string } }>(
   categories: T[]
 ): number {
-  let next = 0;
+  const taken = new Set<string>();
   let changed = 0;
   for (const c of categories) {
     if (!c.data || !c.data.color) continue;
     if (c.name.length === 1 && c.name[0] === 'Uncategorized') continue;
-    const color = MUTED_PALETTE[next % MUTED_PALETTE.length];
-    next += 1;
+    const color = nearestMutedColor(c.data.color, taken);
+    taken.add(color);
     if (c.data.color.toUpperCase() === color.toUpperCase()) continue;
     c.data.color = color;
     changed += 1;
