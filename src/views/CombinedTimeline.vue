@@ -157,7 +157,7 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
     span.step-count.ml-2 {{ stepIndex >= 0 ? stepIndex + 1 : '–' }} / {{ stepRows.length }}
     span.step-track.ml-2 {{ activeTrack ? activeTrack.label : '' }}
 
-  div.stepper.compact(v-if="data && stepRows.length && compact" :style="stepperStyle")
+  div.stepper.compact(v-if="data && stepRows.length && compact" ref="stepper" :style="stepperStyle")
     button.st-arrow(
       type="button"
       :disabled="stepIndex === 0"
@@ -183,6 +183,7 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
       :show-secondary="view.deviceTracks"
       :window-start="windowStart"
       :window-end="windowEnd"
+      :bottom-inset="bottomInset"
       :selected-key="selectedKey"
       :height="timelineHeight"
       :format-duration="fmt"
@@ -418,6 +419,8 @@ export default Vue.extend({
       availableHeight: 0,
       /** Pixels left for the timeline once the measured header is subtracted. */
       timelineSpace: 0,
+      /** Measured height of the compact stepper pill, including the gap under it. */
+      stepperSpace: 0,
       /** Height of the detail peek, so the floating stepper can sit above it. */
       detailHeight: 0,
       /** The peek's own height, remembered so a drag knows what it is snapping back to. */
@@ -538,6 +541,22 @@ export default Vue.extend({
     timelineHeight(): number {
       if (this.compact && this.timelineSpace > 0) return this.timelineSpace;
       return this.windowWidth < 640 ? 520 : 500;
+    },
+    /**
+     * How much empty scroll to leave under the drawing.
+     *
+     * The stepper is handled by shortening the drawing instead (see `measure`), so it
+     * never covers a block at all. The sheet is a deliberate overlay and stays one --
+     * but an overlay you cannot scroll out from under is just a block you can never
+     * read, which is what the owner hit on the S25U. Its peek height becomes scroll
+     * length, so the last stretch of the day can always be brought above it.
+     *
+     * An open sheet also pushes the stepper up over the drawing again; the peek height
+     * is more than that overshoot, so this covers both.
+     */
+    bottomInset(): number {
+      if (!this.compact || !this.selected) return 0;
+      return Math.round(this.detailHeight);
     },
     segments(): Segment[] {
       if (!this.data) return [];
@@ -787,10 +806,19 @@ export default Vue.extend({
       const avail = Math.max(240, window.innerHeight - rootTop - 4);
       if (Math.abs(avail - this.availableHeight) > 1) this.availableHeight = avail;
 
+      // The compact stepper is `position: fixed`, so it is out of the flow and nothing
+      // above accounts for it. Left alone it floats over the drawing and covers blocks
+      // whether or not anything is selected -- the owner, on the S25U: "the prev next
+      // buttons block the timeline even if the sheet is not open". Measure it and give
+      // it a strip of its own, so the drawing simply stops above it.
+      const stepper = this.$refs.stepper as HTMLElement | undefined;
+      const sh = stepper && this.compact ? stepper.getBoundingClientRect().height + 16 : 0;
+      if (Math.abs(sh - this.stepperSpace) > 1) this.stepperSpace = sh;
+
       const body = this.$refs.body as HTMLElement | undefined;
       if (body) {
         const used = body.getBoundingClientRect().top - root.getBoundingClientRect().top;
-        const space = Math.max(160, avail - used - 4);
+        const space = Math.max(160, avail - used - 4 - sh);
         if (Math.abs(space - this.timelineSpace) > 1) this.timelineSpace = space;
       }
       const detail = this.$refs.detail as HTMLElement | undefined;

@@ -139,6 +139,13 @@ export default Vue.extend({
      * parent can drop back to explicit zoom.
      */
     fit: { type: Boolean, default: false },
+    /**
+     * Pixels of empty space to leave past the end of the drawing, so anything the
+     * caller floats over the bottom of this component -- 4.1b's detail peek, the
+     * block stepper -- can be scrolled clear of rather than sitting on top of a
+     * block forever. Pure scroll length: it never moves the drawing.
+     */
+    bottomInset: { type: Number, default: 0 },
     /** Window shown, in minutes from midnight. */
     windowStart: { type: Number, default: 0 },
     windowEnd: { type: Number, default: 24 * 60 },
@@ -440,6 +447,7 @@ export default Vue.extend({
     viewportSignature(): string {
       return [
         this.map.total,
+        this.bottomInset,
         this.containerWidth,
         this.isVertical,
         this.height,
@@ -455,7 +463,8 @@ export default Vue.extend({
       };
     },
     innerStyle(): any {
-      if (this.isVertical) return { width: '100%', height: `${this.map.total}px` };
+      const inset = Math.max(0, this.bottomInset);
+      if (this.isVertical) return { width: '100%', height: `${this.map.total + inset}px` };
       const g = this.geom;
       const h =
         22 +
@@ -463,7 +472,10 @@ export default Vue.extend({
         (this.secondaryTracks.length ? this.secondaryTracks.length * (g.devH + 5) + 8 : 0);
       return {
         width: `${Math.max(this.containerWidth, this.map.total + g.laneOffset)}px`,
-        height: `${Math.max(h, this.height - 8)}px`,
+        // Horizontal scrolls sideways, so an inset cannot buy room at the end of the
+        // day the way it does vertically. It still lengthens the drawing downward,
+        // which is what gets the bottom row out from under an overlay.
+        height: `${Math.max(h, this.height - 8) + inset}px`,
       };
     },
   },
