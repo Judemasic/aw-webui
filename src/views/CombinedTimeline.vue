@@ -131,7 +131,13 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
   //- Block stepper. Tapping a block is fine when it is big; at a whole-day zoom most
   //- blocks are a couple of pixels wide and cannot be hit with a thumb, so give the
   //- selection a keyboard/thumb path that does not depend on the block's size.
-  div.stepper.mb-1(v-if="data && stepRows.length" :class="{ compact }" :style="stepperStyle")
+  //-
+  //- Two shapes, because the two layouts want different things. Wide: a labelled
+  //- button group in the flow, as it has always been. Compact: one floating pill,
+  //- two arrows with the count between them — a grouped pair of dark buttons sitting
+  //- inside a white pill, with the count hanging off the end, read as two controls
+  //- that had collided rather than one.
+  div.stepper.mb-1(v-if="data && stepRows.length && !compact")
     b-button-group(size="sm")
       b-button(
         :disabled="stepIndex === 0"
@@ -145,6 +151,21 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
       ) Next ›
     span.step-count.ml-2 {{ stepIndex >= 0 ? stepIndex + 1 : '–' }} / {{ stepRows.length }}
     span.step-track.ml-2 {{ activeTrack ? activeTrack.label : '' }}
+
+  div.stepper.compact(v-if="data && stepRows.length && compact" :style="stepperStyle")
+    button.st-arrow(
+      type="button"
+      :disabled="stepIndex === 0"
+      title="Previous block"
+      @click="step(-1)"
+    ) ‹
+    span.st-count {{ stepIndex >= 0 ? stepIndex + 1 : '–' }} / {{ stepRows.length }}
+    button.st-arrow(
+      type="button"
+      :disabled="stepIndex >= 0 && stepIndex === stepRows.length - 1"
+      title="Next block"
+      @click="step(1)"
+    ) ›
 
   div.d-flex.timeline-body(v-if="data" ref="body")
     ProportionalTimeline.flex-grow-1(
@@ -167,8 +188,19 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
     //- one action worth taking on it — and only grows to the full detail if asked.
     //- The rejected stopgap docked the whole panel at 60vh; a peek is ~1/6 of the
     //- screen and still puts Resolve… under the thumb, which was the actual defect.
-    aside.detail(v-if="selected" ref="detail" :class="{ sheet: compact, expanded: detailOpen }")
-      div.grab(v-if="compact" @click="detailOpen = !detailOpen")
+    aside.detail(
+      v-if="selected"
+      ref="detail"
+      :class="{ sheet: compact, expanded: detailOpen, dragging: !!sheetDrag }"
+      :style="sheetStyle"
+    )
+      div.grab(
+        v-if="compact"
+        @pointerdown="onGrabDown"
+        @pointermove="onGrabMove"
+        @pointerup="onGrabUp"
+        @pointercancel="onGrabUp"
+      )
       div(v-if="selectedSegment")
         div.d-flex.align-items-start
           div.flex-grow-1
@@ -323,6 +355,12 @@ export default Vue.extend({
       timelineSpace: 0,
       /** Height of the detail peek, so the floating stepper can sit above it. */
       detailHeight: 0,
+      /** The peek's own height, remembered so a drag knows what it is snapping back to. */
+      peakHeight: 0,
+      /** Live drag of the sheet's grab handle: where it started and how tall it was. */
+      sheetDrag: null as null | { y: number; h: number; moved: number },
+      /** Height the drag is holding the sheet at, or null to let the CSS decide. */
+      sheetHeight: null as number | null,
       draggingMap: false,
       // Local, live copy of settings.combined_view. Seeded from the store once it
       // has loaded (see mounted) and written back, debounced, on every change.
@@ -400,6 +438,15 @@ export default Vue.extend({
     },
     rootHeight(): number {
       return this.availableHeight;
+    },
+    /** While a drag is in progress the sheet is exactly as tall as the thumb says. */
+    sheetStyle(): any {
+      if (!this.compact || this.sheetHeight === null) return {};
+      return { height: `${this.sheetHeight}px`, maxHeight: 'none' };
+    },
+    /** The tallest the sheet is allowed to get, dragged or expanded. */
+    maxSheet(): number {
+      return Math.round((typeof window === 'undefined' ? 800 : window.innerHeight) * 0.8);
     },
     stepperStyle(): any {
       if (!this.compact) return {};
@@ -684,6 +731,10 @@ export default Vue.extend({
       const detail = this.$refs.detail as HTMLElement | undefined;
       const h = detail && this.compact ? detail.getBoundingClientRect().height : 0;
       if (Math.abs(h - this.detailHeight) > 1) this.detailHeight = h;
+      // Remember what a peek is worth, so a drag knows what it snaps back to.
+      if (h > 0 && !this.detailOpen && !this.sheetDrag && Math.abs(h - this.peakHeight) > 1) {
+        this.peakHeight = h;
+      }
     },
     /** Copy the stored view prefs into the local live copy, without triggering a save. */
     seedView(v: any) {
@@ -885,6 +936,52 @@ export default Vue.extend({
       };
       if (!s.unresolved) style.background = this.colorFor(s.label);
       return style;
+    },
+    /**
+     * Roadmap 4.1b, on the owner's second look: the grab handle has to *be* a handle —
+     * drag it and the sheet comes with it, rather than a bar that only accepts taps.
+     *
+     * Dragging sets the height directly, so the sheet tracks the thumb one-to-one, and
+     * the body is shown as soon as there is room for it so the growth means something.
+     * Letting go snaps to the nearest of the three states it can be in: gone, peek, or
+     * expanded. A press that never really moved is still a tap, and still toggles —
+     * losing that would trade one gesture for another rather than adding one.
+     */
+    onGrabDown(e: PointerEvent) {
+      const el = this.$refs.detail as HTMLElement | undefined;
+      if (!el) return;
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      this.sheetDrag = { y: e.clientY, h: el.getBoundingClientRect().height, moved: 0 };
+      e.preventDefault();
+    },
+    onGrabMove(e: PointerEvent) {
+      if (!this.sheetDrag) return;
+      const dy = this.sheetDrag.y - e.clientY;
+      this.sheetDrag.moved = Math.max(this.sheetDrag.moved, Math.abs(dy));
+      this.sheetHeight = Math.max(40, Math.min(this.maxSheet, this.sheetDrag.h + dy));
+      // Fill it as it grows, rather than dragging open an empty box.
+      this.detailOpen = this.sheetHeight > this.peakHeight + 40;
+      e.preventDefault();
+    },
+    onGrabUp(e: PointerEvent) {
+      const drag = this.sheetDrag;
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+      this.sheetDrag = null;
+      if (!drag) return;
+      // Barely moved: that was a tap.
+      if (drag.moved < 6) {
+        this.sheetHeight = null;
+        this.detailOpen = !this.detailOpen;
+        return;
+      }
+      const h = this.sheetHeight ?? drag.h;
+      this.sheetHeight = null;
+      const peek = this.peakHeight || drag.h;
+      if (h < peek * 0.6) {
+        this.clearSelection();
+      } else {
+        this.detailOpen = h > (peek + this.maxSheet) / 2;
+      }
     },
     /**
      * Roadmap 4.1b — "not just tappable but also draggable". A pointerdown jumps,
@@ -1102,31 +1199,38 @@ details.tools {
 
   // "stat tiles are taking extra space they can be neater" — the numbers stay, the
   // box, the dividers and the stacked labels go. 57px of tiles becomes one 24px line.
+  //
+  // On real data this first shipped as one nowrap line and broke: `13h 32m` wrapped
+  // inside its own tile and every label truncated to `combin…`, `unresolv…`. A number
+  // whose label is cut off is worse than a number on a second line, and `unresolved`
+  // is the one that matters most. So nothing is ever clipped: each pair stays whole,
+  // and the row wraps to a second line only when the numbers are big enough to need
+  // it. One line at 18px on a quiet day, two at 36px on a busy one — still far below
+  // the 57px of tiles this replaced.
   &.compact {
     border: 0;
     border-radius: 0;
-    gap: 14px;
-    flex-wrap: nowrap;
-    overflow: hidden;
+    gap: 4px 14px;
+    flex-wrap: wrap;
 
     .stat {
       display: flex;
       align-items: baseline;
       gap: 4px;
-      flex: 0 1 auto;
-      min-width: 0;
+      flex: 0 0 auto;
       padding: 1px 0;
       border-right: 0;
 
+      .v,
+      .k {
+        white-space: nowrap;
+      }
       .v {
         display: inline;
         font-size: 13px;
       }
       .k {
         font-size: 10px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
       }
     }
   }
@@ -1139,28 +1243,50 @@ details.tools {
   // hour-label gutter, and stays under the thumb on a phone held one-handed.
   justify-content: flex-end;
 
-  // Compact: a floating pill over the timeline rather than a 31px band above it,
-  // lifted clear of the detail peek when one is open (see stepperStyle).
+  // Compact: one floating pill over the timeline rather than a 31px band above it,
+  // lifted clear of the detail peek when one is open (see stepperStyle). Arrow, count,
+  // arrow — nothing nested, so it reads as a single control.
   &.compact {
     position: fixed;
     right: 10px;
     z-index: 1035;
     margin: 0;
-    padding: 4px 8px;
+    padding: 0 4px;
+    gap: 2px;
+    justify-content: center;
     border-radius: 999px;
+    border: 1px solid rgba(128, 128, 128, 0.28);
     background-color: var(--bg, #fff);
-    box-shadow: 0 1px 10px rgba(0, 0, 0, 0.28);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
     transition: bottom 0.15s ease-out;
-
-    .step-track {
-      display: none;
-    }
-    // 44px, because stepping is how ten overlaps in a row actually get walked.
-    .btn {
-      min-height: 44px;
-      min-width: 64px;
-    }
   }
+}
+
+// 44px, because stepping is how ten overlaps in a row actually get walked.
+.st-arrow {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 22px;
+  line-height: 1;
+
+  &:disabled {
+    opacity: 0.3;
+  }
+  &:active:not(:disabled) {
+    background: rgba(128, 128, 128, 0.18);
+  }
+}
+.st-count {
+  min-width: 62px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  opacity: 0.75;
 }
 .step-count {
   font-variant-numeric: tabular-nums;
@@ -1257,13 +1383,35 @@ details.tools {
     &.expanded {
       overflow: auto;
     }
+    // The bar is 4px; the thing you can grab is 26px of it. A handle that has to be
+    // hit exactly is not a handle.
     .grab {
-      width: 40px;
-      height: 4px;
-      margin: 4px auto 6px;
-      border-radius: 2px;
-      background: rgba(128, 128, 128, 0.45);
-      cursor: pointer;
+      position: relative;
+      height: 26px;
+      margin: -4px 0 2px;
+      cursor: grab;
+      // Otherwise the browser claims the vertical drag for scrolling and the sheet
+      // never sees it.
+      touch-action: none;
+
+      &::before {
+        content: '';
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        width: 44px;
+        height: 4px;
+        margin-left: -22px;
+        border-radius: 2px;
+        background: rgba(128, 128, 128, 0.45);
+      }
+    }
+    // Snap when let go, follow exactly while held.
+    transition: height 0.16s ease-out;
+
+    &.dragging {
+      transition: none;
+      cursor: grabbing;
     }
     h5 {
       font-size: 1rem;
@@ -1291,6 +1439,11 @@ details.tools {
     .detail-body {
       max-height: calc(80vh - 150px);
       overflow: auto;
+    }
+    // Dragged: the sheet's height is set outright, so the body takes what is left
+    // rather than its own cap, and the sheet never grows past the thumb.
+    &.dragging .detail-body {
+      max-height: none;
     }
   }
   .when {
