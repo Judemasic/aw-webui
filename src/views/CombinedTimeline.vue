@@ -211,12 +211,17 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
           b-button.close-x(v-if="compact" size="sm" variant="outline-secondary" @click="clearSelection") ✕
 
         //- Peek row: the primary action, always visible without expanding anything.
+        //-
+        //- Not "Resolve…". The trailing ellipsis is the desktop convention for "this
+        //- opens a dialog and asks you something", but on a button half the screen
+        //- wide it reads as a label that did not fit — the owner read it exactly that
+        //- way on the device. There is room for the whole phrase, so it says it.
         div.peek-actions.mt-2(v-if="compact")
           b-button.act(
             v-if="selectedSegment.unresolved"
             variant="primary"
             @click="openResolve"
-          ) Resolve…
+          ) Resolve overlap
           b-button.act(variant="outline-secondary" @click="detailOpen = !detailOpen")
             | {{ detailOpen ? 'Less' : 'Details' }}
 
