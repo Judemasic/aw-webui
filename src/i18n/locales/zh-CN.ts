@@ -298,6 +298,8 @@ export default {
       saveFailed: '无法保存该决定。',
     },
     categorizeInline: {
+      searchPlaceholder: '搜索应用...',
+      noMatches: '没有未分类的应用与“{query}”匹配。',
       open: '归类 {count} 个未分类应用',
       hide: '隐藏未分类应用',
       assign: '指定类别...',

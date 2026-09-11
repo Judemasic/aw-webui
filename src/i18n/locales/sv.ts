@@ -312,6 +312,8 @@ export default {
       saveFailed: 'Kunde inte spara beslutet.',
     },
     categorizeInline: {
+      searchPlaceholder: 'Sök appar...',
+      noMatches: 'Ingen okategoriserad app matchar "{query}".',
       open: 'Kategorisera {count} okategoriserade appar',
       hide: 'Dölj okategoriserade appar',
       assign: 'Tilldela en kategori...',

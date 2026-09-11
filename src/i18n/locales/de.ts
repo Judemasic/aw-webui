@@ -309,6 +309,8 @@ export default {
       saveFailed: 'Diese Entscheidung konnte nicht gespeichert werden.',
     },
     categorizeInline: {
+      searchPlaceholder: 'Apps suchen...',
+      noMatches: 'Keine nicht kategorisierte App passt zu "{query}".',
       open: '{count} nicht kategorisierte Apps einordnen',
       hide: 'Nicht kategorisierte Apps ausblenden',
       assign: 'Kategorie zuweisen...',

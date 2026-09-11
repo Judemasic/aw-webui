@@ -1,8 +1,17 @@
 <template lang="pug">
 div
-  div.small.text-muted.mb-2(v-if="rows.length === 0")
+  div.small.text-muted.mb-2(v-if="allRows.length === 0")
     | {{ $t('activity.categorizeInline.allCategorized') }}
   div(v-else)
+    b-form-input.mb-2(
+      v-model="search"
+      size="sm"
+      type="search"
+      :placeholder="$t('activity.categorizeInline.searchPlaceholder')"
+      :aria-label="$t('activity.categorizeInline.searchPlaceholder')"
+    )
+    div.small.text-muted.mb-2(v-if="search && rows.length === 0")
+      | {{ $t('activity.categorizeInline.noMatches', { query: search }) }}
     div.d-flex.flex-wrap.align-items-center.py-1.border-top(v-for="r in visible" :key="r.label")
       div.mr-auto.pr-2
         div {{ r.label }}
@@ -71,6 +80,7 @@ export default Vue.extend({
     return {
       PAGE,
       shown: PAGE,
+      search: '',
       busy: false,
       error: '' as string,
       creating: false,
@@ -81,7 +91,7 @@ export default Vue.extend({
   },
   computed: {
     /** The apps that match no category rule at all, biggest first. */
-    rows(): { label: string; seconds: number }[] {
+    allRows(): { label: string; seconds: number }[] {
       const classes = this.categoryStore.classes;
       const pins = this.categoryStore.category_pins;
       const out: { label: string; seconds: number }[] = [];
@@ -92,6 +102,22 @@ export default Vue.extend({
         out.push({ label, seconds: e.duration || 0 });
       }
       return out;
+    },
+    /**
+     * What the list shows: the uncategorised apps, narrowed by the search box.
+     *
+     * Plain case-insensitive substring, not a regex. The box sits above a control that
+     * writes regexes, and a search that quietly interpreted `c++` as a pattern would
+     * both fail to find the app and teach the wrong thing about the field below it.
+     *
+     * Searching filters what the day's query returned, which is capped at 100 apps per
+     * group. A day with more distinct apps than that has a tail the box cannot reach --
+     * but the cap is by duration, so what it cannot reach is the least-used end.
+     */
+    rows(): { label: string; seconds: number }[] {
+      const q = this.search.trim().toLowerCase();
+      if (!q) return this.allRows;
+      return this.allRows.filter(r => r.label.toLowerCase().includes(q));
     },
     visible(): { label: string; seconds: number }[] {
       return this.rows.slice(0, this.shown);
@@ -110,6 +136,13 @@ export default Vue.extend({
         { value: CREATE, text: this.$t('activity.categorizeInline.newCategory') as string },
         ...cats,
       ];
+    },
+  },
+  watch: {
+    // A new search starts at the top of its own results rather than however far the
+    // owner had paged into the previous ones.
+    search() {
+      this.shown = PAGE;
     },
   },
   methods: {

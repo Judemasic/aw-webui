@@ -308,6 +308,8 @@ export default {
       saveFailed: 'Could not save that decision.',
     },
     categorizeInline: {
+      searchPlaceholder: 'Search apps...',
+      noMatches: 'No uncategorised app matches "{query}".',
       open: 'Categorise {count} uncategorised apps',
       hide: 'Hide uncategorised apps',
       assign: 'Assign a category...',
