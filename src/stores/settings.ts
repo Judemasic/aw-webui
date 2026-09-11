@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia';
 import moment, { Moment } from 'moment';
 import { getClient } from '~/util/awclient';
-import { Category, CategorySet, getDefaultClasses, cleanCategory } from '~/util/classes';
+import {
+  Category,
+  CategoryPin,
+  CategorySet,
+  getDefaultClasses,
+  cleanCategory,
+} from '~/util/classes';
 import { SavedQuery } from '~/util/savedQueries';
 import { View, defaultViews } from '~/stores/views';
 import type { PrivacyFilterRule } from '~/util/privacyFilters';
@@ -89,6 +95,9 @@ interface State {
   category_sets: CategorySet[];
   // Ordered list of active set IDs. First entry has highest priority when merging.
   active_set_ids: string[];
+  // Answers to collisions between two equally deep category rules, keyed on the exact
+  // activity label the question was about (roadmap 4.4e). Shared between devices.
+  category_pins: CategoryPin[];
   views: View[];
   saved_queries: SavedQuery[];
 
@@ -155,6 +164,7 @@ export const useSettingsStore = defineStore('settings', {
     classes: getDefaultClasses(),
     category_sets: [],
     active_set_ids: ['default'],
+    category_pins: [],
     views: defaultViews,
     saved_queries: [],
 
@@ -234,6 +244,7 @@ export const useSettingsStore = defineStore('settings', {
           key == 'classes' ||
           key == 'category_sets' ||
           key == 'active_set_ids' ||
+          key == 'category_pins' ||
           key == 'saved_queries';
         try {
           if (isJsonKey) {

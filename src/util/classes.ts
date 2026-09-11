@@ -282,6 +282,12 @@ export function loadClasses(): Category[] {
   return settingsStore.classes;
 }
 
+/** The owner's collision answers, for callers that also use `loadClasses()`. */
+export function loadPins(): CategoryPin[] {
+  const settingsStore = useSettingsStore();
+  return settingsStore.category_pins || [];
+}
+
 /**
  * Persist category sets and active set IDs to the settings store.
  * Also updates the legacy `classes` field for backwards compatibility with external readers.
@@ -369,10 +375,154 @@ function pickDeepest(categories: Category[]) {
   return _.maxBy(categories, c => c.name.length);
 }
 
+// -- Pinned activities (roadmap 4.4e) ---------------------------------------
+//
+// When two rules both match an activity, the deepest category wins; two categories at
+// the *same* depth were resolved by whichever happened to come first in the stored
+// list, which from the owner's point of view is arbitrary. `priority` cannot fix that,
+// because priority is a property of the *rule*, and so answers every collision between
+// two rules identically and forever: rank Work above Fun and `YouTube Morphe` goes to
+// Work along with `youtube G`.
+//
+// So the decision is keyed on the **activity**, not on the rules: "this app is Work",
+// asked once per colliding label and remembered. A new colliding label is a new
+// question.
+
+/** The owner's answer to one collision: this exact activity label is this category. */
+export interface CategoryPin {
+  /** The activity label the question was about, matched exactly. */
+  label: string;
+  /** The category the owner chose, as a full name path. */
+  category: string[];
+  /** When it was decided -- shown in the pinned list, never used to rank. */
+  decided_at?: string;
+}
+
+/**
+ * Rank given to the synthetic rule a pin becomes when it is sent to the server-side
+ * classifier. It has to beat any depth-derived rank (`depth * 10`) by a margin no real
+ * category hierarchy could reach. Two pins can never compete with each other: each
+ * matches one exact label and no other.
+ */
+export const PIN_PRIORITY = 1000000;
+
+/** Escape a label so it can be used as a literal inside a regex. */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Every category whose rule matches, in stored order. */
+export function matchingCategories(
+  str: string,
+  categories: Category[],
+  event?: IEvent
+): Category[] {
+  return categories
+    .filter(c => c.rule && c.rule.type == 'regex')
+    .filter(c => {
+      // using 'm' flag to make `$` and `^` in rules work
+      const re = RegExp(c.rule.regex, (c.rule.ignore_case ? 'i' : '') + 'm');
+      const selectKeys = normalizeSelectKeys(c.rule.select_keys);
+      if (event && selectKeys) {
+        return selectKeys.some(key => {
+          const value = event.data[key];
+          return typeof value === 'string' && re.test(value);
+        });
+      }
+      return re.test(str);
+    });
+}
+
+/**
+ * The matches that are actually competing for the win -- those at the greatest depth.
+ * More than one means the winner would otherwise be decided by array order, which is
+ * the collision this mechanism exists to answer.
+ */
+export function tiedCategories(matches: Category[]): Category[] {
+  if (matches.length === 0) return [];
+  const deepest = _.max(matches.map(c => c.name.length));
+  return matches.filter(c => c.name.length === deepest);
+}
+
+/** The pin recorded for this exact label, if any. */
+export function pinFor(label: string, pins?: CategoryPin[]): CategoryPin | undefined {
+  if (!pins || pins.length === 0) return undefined;
+  return pins.find(p => p.label === label);
+}
+
+/**
+ * What a pin is doing right now.
+ *
+ * A pin only decides anything while its collision still exists. If the rules are later
+ * edited so the label no longer ties -- or so the pinned category no longer matches it
+ * at all -- the pin goes **inert**: it stops applying but is still listed, because an
+ * override that silently keeps applying, or silently vanishes, is one the owner will
+ * end up mistrusting the totals over.
+ */
+export function pinStatus(
+  pin: CategoryPin,
+  categories: Category[]
+): { active: boolean; tied: Category[] } {
+  const tied = tiedCategories(matchingCategories(pin.label, categories));
+  const active = tied.length > 1 && tied.some(c => _.isEqual(c.name, pin.category));
+  return { active, tied };
+}
+
+/** Only the pins that are still resolving a live collision. */
+export function activePins(pins: CategoryPin[], categories: Category[]): CategoryPin[] {
+  return (pins || []).filter(p => pinStatus(p, categories).active);
+}
+
+/**
+ * The pins, expressed as rules the server-side classifier understands.
+ *
+ * The webui and aw-transform are two separate classifiers, and 4.4d is the standing
+ * lesson about letting two screens answer the same question differently. So a pin is
+ * not special-cased server-side: it is sent as an ordinary category rule that matches
+ * one exact app label and carries a priority nothing else can reach. aw-query has
+ * parsed `priority` on a rule since upstream #663; this is the first thing to send it.
+ */
+export function pinsForQuery(
+  pins: CategoryPin[],
+  categories: Category[]
+): [string[], Rule & { priority: number }][] {
+  return activePins(pins, categories).map(p => [
+    p.category,
+    {
+      type: 'regex' as const,
+      regex: '^' + escapeRegex(p.label) + '$',
+      select_keys: ['app'],
+      priority: PIN_PRIORITY,
+    },
+  ]);
+}
+
+/**
+ * The collisions among a set of activity labels that the owner has not answered yet.
+ * A label already pinned is never asked about again -- that is the whole point.
+ */
+export function unansweredConflicts(
+  labels: string[],
+  categories: Category[],
+  pins?: CategoryPin[]
+): { label: string; tied: Category[] }[] {
+  const answered = new Set((pins || []).map(p => p.label));
+  const seen = new Set<string>();
+  const out: { label: string; tied: Category[] }[] = [];
+  for (const label of labels) {
+    if (!label || seen.has(label) || answered.has(label)) continue;
+    seen.add(label);
+    const tied = tiedCategories(matchingCategories(label, categories));
+    if (tied.length > 1) out.push({ label, tied });
+  }
+  return out;
+}
+
 export function matchString(
   str: string,
   categories: Category[] | null,
-  event?: IEvent
+  event?: IEvent,
+  pins?: CategoryPin[]
 ): Category | null {
   if (!categories) {
     console.log(
@@ -381,31 +531,22 @@ export function matchString(
     categories = loadClasses();
   }
 
-  // Compile regexes
-  const regexes: [Category, RegExp][] = categories
-    .filter(c => c.rule.type == 'regex')
-    .map(c => {
-      // using 'm' flag to make `$` and `^` in rules work
-      const re = RegExp(c.rule.regex, (c.rule.ignore_case ? 'i' : '') + 'm');
-      return [c, re];
-    });
-
-  // Find the matching category.
+  // Find the matching categories.
   // If several categories match the event, the deepest category will be chosen.
-  const matchingCats: [Category, RegExp][] = regexes.filter(([category, re]) => {
-    const selectKeys = normalizeSelectKeys(category.rule.select_keys);
-    if (event && selectKeys) {
-      return selectKeys.some(key => {
-        const value = event.data[key];
-        return typeof value === 'string' && re.test(value);
-      });
+  const matchingCats = matchingCategories(str, categories, event);
+  if (matchingCats.length === 0) return null;
+
+  // If the owner answered this exact collision, their answer outranks depth -- but only
+  // while the collision is still there to answer (see pinStatus).
+  const pin = pinFor(str, pins);
+  if (pin) {
+    const tied = tiedCategories(matchingCats);
+    if (tied.length > 1) {
+      const chosen = tied.find(c => _.isEqual(c.name, pin.category));
+      if (chosen) return chosen;
     }
-    return re.test(str);
-  });
-  if (matchingCats.length > 0) {
-    return pickDeepest(matchingCats.map(c => c[0]));
   }
-  return null;
+  return pickDeepest(matchingCats);
 }
 
 // this is used only in tests

@@ -1,5 +1,5 @@
 import _ from 'lodash';
-import { Category, matchString, loadClasses } from './classes';
+import { Category, CategoryPin, matchString, loadClasses, loadPins } from './classes';
 import Color from 'color';
 import * as d3 from 'd3';
 import { IEvent, IBucket } from './interfaces';
@@ -92,7 +92,7 @@ export function getColorFromCategory(c: Category, allCats: Category[]): string {
 export function getCategoryColorFromString(str: string): string {
   // TODO: Don't load classes on every call
   const allCats = loadClasses();
-  const c = matchString(str, allCats);
+  const c = matchString(str, allCats, undefined, loadPins());
   if (c !== null) {
     return getColorFromCategory(c, allCats);
   } else {
@@ -167,7 +167,7 @@ export function getCategoryColorFromEvent(bucket: IBucket, e: IEvent) {
   const categorizationString = getCategorizationStringFromEvent(bucket, e);
   if (categorizationString !== null) {
     const allCats = loadClasses();
-    const matched = matchString(categorizationString, allCats, e);
+    const matched = matchString(categorizationString, allCats, e, loadPins());
     if (matched !== null) {
       return getColorFromCategory(matched, allCats);
     }
@@ -200,8 +200,12 @@ export function getCategoryColorFromEvent(bucket: IBucket, e: IEvent) {
  * `classes` is passed in rather than loaded, because the caller draws hundreds of blocks
  * per day and `loadClasses()` is not free. Pass `categoryStore.classes`.
  */
-export function getCategoryColorForLabel(label: string, classes: Category[]): string {
-  const matched = matchString(label || '', classes);
+export function getCategoryColorForLabel(
+  label: string,
+  classes: Category[],
+  pins?: CategoryPin[]
+): string {
+  const matched = matchString(label || '', classes, undefined, pins);
   if (matched !== null) {
     return getColorFromCategory(matched, classes);
   }

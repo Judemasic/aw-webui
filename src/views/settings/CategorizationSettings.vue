@@ -71,6 +71,23 @@ div
       b-btn.float-right(@click="saveClasses", variant="success" :disabled="!classes_unsaved_changes")
         | {{ $t('common.save') }}
 
+  div.mt-4
+    div.d-flex.align-items-center.flex-wrap
+      h5.mb-0 {{ $t('settings.categorization.conflicts.title') }}
+      small.text-muted.ml-2 {{ $t('settings.categorization.conflicts.subtitle') }}
+      b-btn.ml-auto(
+        variant="outline-primary"
+        size="sm"
+        @click="conflictsOpen = !conflictsOpen"
+        :aria-expanded="conflictsOpen ? 'true' : 'false'"
+        aria-controls="category-conflicts-collapse"
+      )
+        icon.mr-1(:name="conflictsOpen ? 'angle-double-up' : 'angle-double-down'")
+        | {{ conflictsOpen ? $t('settings.categorization.conflicts.hide') : $t('settings.categorization.conflicts.open') }}
+    b-collapse#category-conflicts-collapse(v-model="conflictsOpen")
+      div.mt-3(v-if="conflictsMounted")
+        CategoryConflicts
+
   div.mt-4(ref="builderSection")
     div.d-flex.align-items-center.flex-wrap
       h5.mb-0 {{ $t('settings.categorization.builderTitle') }}
@@ -122,6 +139,7 @@ export default {
     CategoryEditTree,
     CategoryEditModal,
     CategoryBuilder: () => import('~/views/settings/CategoryBuilder.vue'),
+    CategoryConflicts: () => import('~/components/CategoryConflicts.vue'),
   },
   data: () => ({
     categoryStore: useCategoryStore(),
@@ -129,6 +147,10 @@ export default {
     activeSetId: 'default',
     builderOpen: false,
     builderMounted: false,
+    // The conflicts panel queries a week of combined timeline when it mounts, so it is
+    // mounted on first open rather than with the page.
+    conflictsOpen: false,
+    conflictsMounted: false,
     showCreateSetModal: false,
     newSetName: '',
   }),
@@ -139,6 +161,9 @@ export default {
   watch: {
     builderOpen(v: boolean) {
       if (v) this.builderMounted = true;
+    },
+    conflictsOpen(v: boolean) {
+      if (v) this.conflictsMounted = true;
     },
     'categoryStore.active_set_ids': {
       handler(newIds: string[]) {

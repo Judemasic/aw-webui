@@ -8,10 +8,14 @@ import {
   createMissingParents,
   mergeCategorySets,
   annotate,
+  pinsForQuery,
+  pinStatus,
   Category,
+  CategoryPin,
   CategorySet,
   Rule,
 } from '~/util/classes';
+import { useSettingsStore } from '~/stores/settings';
 import { getColorFromCategory } from '~/util/color';
 import { defineStore } from 'pinia';
 
@@ -22,6 +26,8 @@ interface State {
   category_sets: CategorySet[];
   // Ordered list of active set IDs; first entry has highest priority when merging
   active_set_ids: string[];
+  // The owner's answers to rule collisions, one per activity label (roadmap 4.4e)
+  category_pins: CategoryPin[];
 }
 
 function getScoreFromCategory(c: Category, allCats: Category[]): number {
@@ -89,6 +95,7 @@ export const useCategoryStore = defineStore('categories', {
     classes_unsaved_changes: false,
     category_sets: [],
     active_set_ids: ['default'],
+    category_pins: [],
   }),
 
   // getters
@@ -101,11 +108,23 @@ export const useCategoryStore = defineStore('categories', {
       return _.sortBy(hier, [c => c.id || 0]);
     },
     classes_for_query(): [string[], Rule][] {
-      return this.classes
+      const rules: [string[], Rule][] = this.classes
         .filter(c => c.rule.type !== null)
         .map(c => {
           return [c.name, c.rule];
         });
+      // A pin rides along as an ordinary rule with a priority nothing else reaches, so
+      // the server-side classifier reaches the same answer the webui does rather than
+      // the two disagreeing about the same day (4.4d's lesson).
+      return rules.concat(pinsForQuery(this.category_pins, this.classes));
+    },
+
+    /** Pins with what they are currently doing, for the pinned list in settings. */
+    pins_annotated(): { pin: CategoryPin; active: boolean; tied: Category[] }[] {
+      return (this.category_pins || []).map((pin: CategoryPin) => ({
+        pin,
+        ...pinStatus(pin, this.classes),
+      }));
     },
     all_categories(): string[][] {
       // Returns a list of category names (a list of list of strings)
@@ -205,7 +224,31 @@ export const useCategoryStore = defineStore('categories', {
 
       // Compute effective classes from active sets (merged in priority order)
       this.classes = computeEffectiveClasses(this.category_sets, this.active_set_ids);
+      this.category_pins = useSettingsStore().category_pins || [];
       this.classes_unsaved_changes = false;
+    },
+
+    /**
+     * Record the owner's answer to a collision: this exact label is this category.
+     *
+     * Saved immediately rather than joining the categories' unsaved-changes buffer --
+     * it is an answer to a question the app asked, not an edit in progress, and the
+     * two have different undo affordances (the pinned list, versus Discard).
+     */
+    async pinLabel(this: State, label: string, category: string[]) {
+      const others = (this.category_pins || []).filter((p: CategoryPin) => p.label !== label);
+      this.category_pins = others.concat([
+        { label, category, decided_at: new Date().toISOString() },
+      ]);
+      if (process.env.NODE_ENV === 'test') return;
+      await useSettingsStore().update({ category_pins: this.category_pins });
+    },
+
+    /** Forget an answer, so the label becomes a question again. */
+    async unpinLabel(this: State, label: string) {
+      this.category_pins = (this.category_pins || []).filter((p: CategoryPin) => p.label !== label);
+      if (process.env.NODE_ENV === 'test') return;
+      await useSettingsStore().update({ category_pins: this.category_pins });
     },
 
     async save(this: State) {

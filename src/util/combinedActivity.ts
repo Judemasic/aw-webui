@@ -19,7 +19,7 @@
  */
 import moment from 'moment';
 import { IEvent } from '~/util/interfaces';
-import { Category, matchString } from '~/util/classes';
+import { Category, CategoryPin, matchString } from '~/util/classes';
 import { get_day_start_with_offset } from '~/util/time';
 
 /**
@@ -41,12 +41,14 @@ export interface CombinedSegment {
   device: string;
   unresolved?: boolean;
   ignored?: boolean;
+  /** The other activities that were running in this window (the losers of the pick). */
+  background?: { device: string; label: string }[];
 }
 
 export interface CombinedTimelineResponse {
   combined: CombinedSegment[];
   combined_seconds: number;
-  devices?: { device: string; seconds?: number }[];
+  devices?: { device: string; seconds?: number; hostname?: string; is_own?: boolean }[];
 }
 
 export interface CombinedActivityResult {
@@ -94,7 +96,8 @@ function topBy<T>(
  */
 export function combinedToActivity(
   res: CombinedTimelineResponse,
-  classes: Category[]
+  classes: Category[],
+  pins?: CategoryPin[]
 ): CombinedActivityResult {
   const all = res.combined || [];
   const counted = all.filter(s => !s.ignored);
@@ -105,7 +108,7 @@ export function combinedToActivity(
   const categoryOf = (label: string): string[] => {
     const hit = catCache.get(label);
     if (hit) return hit;
-    const matched = matchString(label || '', classes);
+    const matched = matchString(label || '', classes, undefined, pins);
     const name = matched ? matched.name : ['Uncategorized'];
     catCache.set(label, name);
     return name;
