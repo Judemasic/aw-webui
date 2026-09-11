@@ -19,6 +19,7 @@ const Settings = () => import('./views/settings/Settings.vue');
 // redirect, so no direct reference here. Keeping the import out avoids
 // pulling a second copy into a separate chunk.
 const Stopwatch = () => import('./views/Stopwatch.vue');
+const Sync = () => import('./views/Sync.vue');
 const WorkReport = () => import('./views/WorkReport.vue');
 const BillingView = () => import('./views/BillingView.vue');
 const AISummaryView = () => import('./views/AISummaryView.vue');
@@ -71,6 +72,7 @@ const router = new VueRouter({
     { path: '/query', component: QueryExplorer },
     { path: '/alerts', component: Alerts },
     { path: '/timespiral', component: TimespiralView },
+    { path: '/sync', component: Sync },
     { path: '/settings', component: Settings },
     // Category Builder now lives embedded inside the Categorization
     // settings panel; keep the old standalone route as a redirect so

@@ -98,6 +98,10 @@ div(:class="{'fixed-top-padding': fixedTopMenu}")
           div.px-2.px-lg-1
             icon(name="database")
             | {{ $t('nav.rawData') }}
+        b-nav-item(to="/sync")
+          div.px-2.px-lg-1
+            icon(name="sync-alt")
+            |  Sync
         b-nav-item(to="/settings")
           div.px-2.px-lg-1
             icon(name="cog")
@@ -127,6 +131,7 @@ import 'vue-awesome/icons/stopwatch';
 import 'vue-awesome/icons/layer-group';
 import 'vue-awesome/icons/robot';
 import 'vue-awesome/icons/cog';
+import 'vue-awesome/icons/sync-alt';
 import 'vue-awesome/icons/tools';
 import 'vue-awesome/icons/history';
 import 'vue-awesome/icons/project-diagram';

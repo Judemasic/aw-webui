@@ -501,3 +501,133 @@ label.btn-outline-danger {
   background-color: rgba(26, 29, 36, 0.94) !important;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6) !important;
 }
+
+/* ==========================================================================
+   Yellow, and grey, and why they hurt
+   --------------------------------------------------------------------------
+   Two rules above turn a *secondary* button bright amber:
+
+     .btn-outline-secondary:hover                      { background: #ffc107 }
+     [class*=table-responsive-] > .table .btn-outline-secondary
+                                                       { background: #ffc107 }
+
+   The first means every plain grey button in the app flashes saturated
+   #ffc107 under the pointer. The second is not even conditional: inside a
+   table, a secondary button simply *is* bright yellow, permanently. Neither
+   is a colour anybody chose for those buttons -- `secondary` means "the
+   quieter option", and there is no reading of that which ends at the most
+   saturated hue on the palette. On a dark ground the effect is worse than on
+   a light one, because the surrounding surface is ~5% lightness and the
+   button is ~51%: that is close to the maximum contrast step the screen can
+   make, applied to a control whose whole job is to not shout.
+
+   The grey half is the same rule set from the other side. `.btn-outline-
+   secondary` is given `border-color: #282c32`, which is the card-border
+   colour -- against the #1a1d24 page it is nearly invisible, so the button
+   reads as absent until it is hovered, at which point it is a block of
+   yellow. Faint-then-searing is the pairing that hurts, and it was never a
+   decision; it is two unrelated rules meeting.
+
+   So: secondary buttons are grey, and legible, in both states. Amber is kept
+   for the things that actually mean "warning", and desaturated to sit on a
+   dark ground -- Bootstrap's #ffc107 is tuned for black text on white paper,
+   and hsl(45, 100%, 51%) against a near-black page is the single harshest
+   pair in the stylesheet.
+   ========================================================================== */
+
+.btn-outline-secondary,
+label.btn-outline-secondary {
+  /* Visible at rest. A control the eye cannot find is not a quiet control. */
+  border-color: #4a515c !important;
+  color: #c3c8d1 !important;
+}
+
+.btn-outline-secondary:hover,
+.btn-outline-secondary:focus,
+.btn-outline-secondary:not(:disabled):not(.disabled):active,
+.btn-outline-secondary:not(:disabled):not(.disabled).active,
+label.btn-outline-secondary:hover {
+  /* One step up the same grey, which is what "hover" should mean here. */
+  background-color: #343a44 !important;
+  border-color: #5b6472 !important;
+  color: #f2f4f8 !important;
+}
+
+/* Same selector as the table rule above, so this wins by coming later rather
+   than by piling on specificity. */
+[class*=table-responsive-] > .table .btn-outline-secondary {
+  background-color: transparent !important;
+  border-color: #4a515c !important;
+  color: #c3c8d1 !important;
+}
+
+[class*=table-responsive-] > .table .btn-outline-secondary:hover {
+  background-color: #343a44 !important;
+  color: #f2f4f8 !important;
+}
+
+/* ---- Amber, for the things that mean warning ---------------------------- */
+
+/* #ffc107 is hsl(45, 100%, 51%): full saturation, tuned for dark text on a
+   white page. Dropped to 72% saturation it is still unmistakably the warning
+   colour and stops being a light source. Dark text stays -- amber this light
+   needs it, and it matches the light theme's reading of the same button. */
+.btn-warning,
+.badge-warning {
+  background-color: #e0b43c !important;
+  border-color: #e0b43c !important;
+  color: #1a1d24 !important;
+}
+
+.btn-warning:hover,
+.btn-warning:focus,
+.btn-warning:not(:disabled):not(.disabled):active {
+  background-color: #ecc357 !important;
+  border-color: #ecc357 !important;
+  color: #1a1d24 !important;
+}
+
+/* Text, not a surface: this one needs to be *lighter* than the button, since
+   it is thin glyphs on a dark ground rather than a filled block. */
+.text-warning {
+  color: #f2d585 !important;
+}
+
+.btn-outline-warning,
+label.btn-outline-warning {
+  color: #eccb6a !important;
+  border-color: #eccb6a !important;
+}
+
+.btn-outline-warning:hover,
+.btn-outline-warning:focus,
+.btn-outline-warning:not(:disabled):not(.disabled):active {
+  background-color: #eccb6a !important;
+  color: #1a1d24 !important;
+  border-color: #eccb6a !important;
+}
+
+/* A solid amber button sitting *inside* a warning alert was the loudest pair
+   on the screen: #ffc107 at 51% lightness on the alert's hsl(45,60%,30%)
+   ground, same hue, both saturated. Inside an alert the button does not need
+   to announce the colour -- the alert already did -- so it drops to the
+   alert's own family and reads as a control rather than a hazard stripe. */
+.alert-warning .btn-warning {
+  background-color: hsl(45, 55%, 46%) !important;
+  border-color: hsl(45, 55%, 52%) !important;
+  color: #17140a !important;
+}
+
+.alert-warning .btn-warning:hover {
+  background-color: hsl(45, 55%, 54%) !important;
+}
+
+.alert-warning .btn-outline-warning {
+  color: hsl(45, 80%, 82%) !important;
+  border-color: hsl(45, 50%, 60%) !important;
+}
+
+.alert-warning .btn-outline-warning:hover {
+  background-color: hsl(45, 50%, 42%) !important;
+  color: #fff !important;
+}
