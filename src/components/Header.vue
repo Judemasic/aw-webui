@@ -98,7 +98,10 @@ div(:class="{'fixed-top-padding': fixedTopMenu}")
           div.px-2.px-lg-1
             icon(name="database")
             | {{ $t('nav.rawData') }}
-        b-nav-item(to="/sync")
+        //- Not in the Android app: the server there does not mount /api/0/sync at all, because
+        //- the app owns sync through SAF. A nav item leading to a page that cannot answer is
+        //- worse than no nav item.
+        b-nav-item(v-if="!$isAndroid" to="/sync")
           div.px-2.px-lg-1
             icon(name="sync-alt")
             |  Sync
