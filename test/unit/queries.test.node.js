@@ -77,3 +77,41 @@ describe('not-counted categories (roadmap 4.6)', () => {
     expect(q).toContain('exclude_keyvals(events, "$category"');
   });
 });
+
+describe('notCountedQuery (roadmap 4.6b)', () => {
+  const excluded = [['Excluded'], ['Excluded', 'Launcher']];
+
+  it('asks the inverse question: keep only what the day dropped', () => {
+    const q = queries
+      .notCountedQuery({ ...queryParams, not_counted_categories: excluded })
+      .join('\n');
+    // Keeps the excluded categories...
+    expect(q).toContain(`filter_keyvals(events, "$category", ${JSON.stringify(excluded)})`);
+    // ...and must not then drop them again, which would sum to zero every time.
+    expect(q).not.toContain('exclude_keyvals');
+    expect(q).toContain('sum_durations(');
+    expectBracketsClosed(q);
+  });
+
+  it('groups by category, so each rule can be shown its own figure', () => {
+    const q = queries
+      .notCountedQuery({ ...queryParams, not_counted_categories: excluded })
+      .join('\n');
+    expect(q).toContain('merge_events_by_keys(events, ["$category"])');
+  });
+
+  it('works from an Android bucket too', () => {
+    const q = queries
+      .notCountedQuery({
+        bid_android: 'aw-watcher-android_test',
+        isIos: false,
+        categories: [],
+        filter_categories: [],
+        not_counted_categories: excluded,
+      })
+      .join('\n');
+    expect(q).toContain('aw-watcher-android_test');
+    expect(q).toContain(`filter_keyvals(events, "$category", ${JSON.stringify(excluded)})`);
+    expectBracketsClosed(q);
+  });
+});

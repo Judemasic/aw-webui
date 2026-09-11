@@ -331,6 +331,16 @@ export default {
       allCategorized: 'Hier ist alles kategorisiert.',
       saveFailed: 'Diese Kategorie konnte nicht gespeichert werden.',
     },
+    notCounted: {
+      open: '{count} Kategorien zählen nicht',
+      hide: 'Nicht gezählte Zeit ausblenden',
+      explain:
+        'Zeit, die auf diese Kategorien passt, fehlt überall in allen Summen. Nichts wird gelöscht.',
+      inPeriod: 'hier nicht gezählt',
+      notMeasured: 'Auf dieser Seite nicht ermittelt.',
+      countAgain: 'Wieder zählen',
+      saveFailed: 'Diese Regel konnte nicht geändert werden.',
+    },
     timeActive: 'Aktive Zeit:',
     queryRange: 'Abfragezeitraum:',
     filters: 'Filter',

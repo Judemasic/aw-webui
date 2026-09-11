@@ -1,4 +1,4 @@
-import { prettyScreenName } from '~/util/screenNames';
+import { prettyScreenName, screenRowName } from '~/util/screenNames';
 
 describe('prettyScreenName', () => {
   it('drops the package and splits the class name into words', () => {
@@ -36,5 +36,31 @@ describe('prettyScreenName', () => {
 
   it('never invents a name for a class that has none', () => {
     expect(prettyScreenName('Launcher')).toBe('Launcher');
+  });
+});
+
+describe('screenRowName', () => {
+  // The owner's request on first seeing the panel: "can the top screen have the app before it?
+  // like youtube main activity". Half a dozen rows read "Main Activity" and nothing said whose.
+  it('puts the app before the screen', () => {
+    expect(screenRowName('com.google.android.youtube.app.MainActivity', 'YouTube')).toBe(
+      'YouTube — Main Activity'
+    );
+  });
+
+  it('keeps the two levels of nesting apart', () => {
+    // An em dash between app and screen, the middle dot inside a nested class.
+    expect(screenRowName('com.whatsapp.calling.ui.Voip$Inner', 'WhatsApp')).toBe(
+      'WhatsApp — Voip · Inner'
+    );
+  });
+
+  it('does not print the app twice when there is no screen to name', () => {
+    expect(screenRowName('', 'Photos')).toBe('Photos');
+    expect(screenRowName(null, 'Photos')).toBe('Photos');
+  });
+
+  it('still names the screen when the app is unknown', () => {
+    expect(screenRowName('com.foo.HomeActivity')).toBe('Home Activity');
   });
 });

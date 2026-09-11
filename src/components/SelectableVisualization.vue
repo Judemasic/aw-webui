@@ -126,7 +126,7 @@ import 'vue-awesome/icons/times';
 import 'vue-awesome/icons/bars';
 
 import { buildBarchartDataset } from '~/util/datasets';
-import { prettyScreenName } from '~/util/screenNames';
+import { screenRowName } from '~/util/screenNames';
 import { COMBINED_UNAVAILABLE_TYPES } from '~/util/combinedActivity';
 
 // TODO: Move this somewhere else
@@ -187,7 +187,7 @@ export default {
       top_screen_namefunc: e =>
         this.activityStore.ios.available
           ? e.data.classname
-          : prettyScreenName(e.data.classname, e.data.app),
+          : screenRowName(e.data.classname, e.data.app),
       top_screen_hoverfunc: e => [e.data.app, e.data.classname].filter(Boolean).join('\n'),
       // TODO: Move this function somewhere else
       top_editor_files_namefunc: e => {

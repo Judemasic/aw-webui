@@ -330,6 +330,16 @@ export default {
       allCategorized: 'Everything here is categorised.',
       saveFailed: 'Could not save that category.',
     },
+    notCounted: {
+      open: 'Not counting {count} categories',
+      hide: 'Hide what is not counted',
+      explain:
+        'Time these categories match is left out of every total, everywhere. Nothing is deleted.',
+      inPeriod: 'not counted here',
+      notMeasured: 'Not measured on this page.',
+      countAgain: 'Count it again',
+      saveFailed: 'Could not change that rule.',
+    },
     timeActive: 'Time active:',
     queryRange: 'Query range:',
     filters: 'Filters',

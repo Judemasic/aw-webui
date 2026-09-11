@@ -294,3 +294,97 @@ describe('per-screen rows on the combined day (roadmap 4.4i)', () => {
     expect(COMBINED_UNAVAILABLE_TYPES.has('top_titles')).toBe(true);
   });
 });
+
+describe('per-screen rows after the coarser merge (roadmap 4.5c)', () => {
+  it('sums the shares of a block rather than crediting its dominant screen', () => {
+    // One block of Photos that went Home -> Story -> Home. Before 4.5c this arrived as three
+    // blocks; now it is one, and all 215s would land on Home if `shares` were ignored.
+    const out = combinedToActivity(
+      res([
+        seg({
+          label: 'Photos',
+          seconds: 215,
+          detail: { app: 'Photos', classname: 'HomeActivity' },
+          shares: [
+            { detail: { app: 'Photos', classname: 'HomeActivity' }, seconds: 200 },
+            { detail: { app: 'Photos', classname: 'StoryViewActivity' }, seconds: 15 },
+          ],
+        }),
+      ]),
+      classes
+    );
+    expect(out.title_events.map(e => [e.data.classname, e.duration])).toEqual([
+      ['HomeActivity', 200],
+      ['StoryViewActivity', 15],
+    ]);
+  });
+
+  it('falls back to the screen on the block itself when no shares arrived', () => {
+    // A response from a server that predates 4.5c must still fill the panel.
+    const out = combinedToActivity(
+      res([seg({ label: 'Photos', seconds: 60, detail: { classname: 'HomeActivity' } })]),
+      classes
+    );
+    expect(out.title_events.map(e => [e.data.app, e.data.classname, e.duration])).toEqual([
+      ['Photos', 'HomeActivity', 60],
+    ]);
+  });
+
+  it('adds the screens of one app up across separate blocks', () => {
+    const out = combinedToActivity(
+      res([
+        seg({
+          label: 'Photos',
+          seconds: 30,
+          shares: [{ detail: { classname: 'HomeActivity' }, seconds: 30 }],
+        }),
+        seg({
+          label: 'Photos',
+          seconds: 20,
+          shares: [{ detail: { classname: 'HomeActivity' }, seconds: 20 }],
+        }),
+      ]),
+      classes
+    );
+    expect(out.title_events.map(e => e.duration)).toEqual([50]);
+  });
+
+  it('says nothing at all on a day with no screens', () => {
+    const out = combinedToActivity(res([seg({ label: 'vim', seconds: 60 })]), classes);
+    expect(out.title_events).toEqual([]);
+  });
+});
+
+describe('what the exclusion rules ate (roadmap 4.6b)', () => {
+  it('sums the blocks a rule emptied, per category', () => {
+    const out = combinedToActivity(
+      res([
+        seg({ label: 'vim', seconds: 600 }),
+        seg({ label: 'Slack', seconds: 100, ignored: true, not_counted: true }),
+        seg({ label: 'Slack', seconds: 50, ignored: true, not_counted: true }),
+      ]),
+      classes
+    );
+    expect(out.not_counted).toEqual([{ name: ['Comms'], seconds: 150 }]);
+  });
+
+  it('does not count a block the owner answered "I was away" about', () => {
+    // That is a decision, not a rule, and it has its own undo. Mixing the two would offer to
+    // revoke a rule that was never what stopped this block counting.
+    const out = combinedToActivity(
+      res([seg({ label: 'Slack', seconds: 100, ignored: true })]),
+      classes
+    );
+    expect(out.not_counted).toEqual([]);
+  });
+
+  it('does not count time an excluded app merely competed for', () => {
+    // The block still counts -- the launcher simply stopped being a competitor for it -- so the
+    // rule is not eating this time and must not be shown as if it were.
+    const out = combinedToActivity(
+      res([seg({ label: 'vim', seconds: 600, excluded_labels: ['One UI Home'] })]),
+      classes
+    );
+    expect(out.not_counted).toEqual([]);
+  });
+});

@@ -163,6 +163,14 @@ div
     b-collapse.mt-2(v-model="categorizeOpen")
       aw-inline-categorize(:events="activityStore.window.top_apps" @changed="refresh(true)")
 
+  // Roadmap 4.6b -- a rule that stops time counting has to be visible somewhere, or the day's
+  // total quietly shrinks for a reason nothing on the page explains.
+  div.mt-2(v-if="notCountedCount > 0")
+    b-btn(variant="outline-secondary" size="sm" @click="notCountedOpen = !notCountedOpen")
+      | {{ notCountedOpen ? $t('activity.notCounted.hide') : $t('activity.notCounted.open', { count: notCountedCount }) }}
+    b-collapse.mt-2(v-model="notCountedOpen")
+      aw-not-counted(@changed="refresh(true)")
+
   ul.row.nav.nav-tabs.mt-4
     li.nav-item(v-for="view in views")
       router-link.nav-link(:to="{ name: 'activity-view', params: {...$route.params, view_id: view.id}, query: $route.query}" :class="{'router-link-exact-active': currentView.id == view.id}")
@@ -282,6 +290,7 @@ export default {
     'aw-uncategorized-notification': () => import('~/components/UncategorizedNotification.vue'),
     'aw-inline-resolve': () => import('~/components/InlineResolve.vue'),
     'aw-inline-categorize': () => import('~/components/InlineCategorize.vue'),
+    'aw-not-counted': () => import('~/components/NotCountedPanel.vue'),
   },
   props: {
     host: String,
@@ -309,6 +318,8 @@ export default {
       showOptions: false,
       resolveOpen: false,
       categorizeOpen: false,
+      /** Roadmap 4.6b — the exclusions panel, closed until asked for. */
+      notCountedOpen: false,
 
       include_audible: true,
       // Include stopwatch events when a stopwatch bucket exists. The
@@ -357,6 +368,18 @@ export default {
      * say how many there are -- and so the whole thing stays hidden on a day where
      * everything is already categorised.
      */
+    /**
+     * Roadmap 4.6b — how many categories the owner has marked as not counting.
+     *
+     * Counted from the categories rather than from the measured figures, so the panel offers itself
+     * on a day the rules happened to eat nothing: the rule is still on, and *that* is the thing
+     * worth being able to see and revoke.
+     */
+    notCountedCount(): number {
+      return (this.categoryStore.classes || []).filter(
+        (c: any) => c.data && c.data.not_counted === true
+      ).length;
+    },
     uncategorizedApps(): any[] {
       const events = (this.activityStore.window && this.activityStore.window.top_apps) || [];
       return events.filter((e: any) => {
@@ -633,6 +656,11 @@ export default {
         always_active_pattern: this.always_active_pattern,
       };
       await this.activityStore.ensure_loaded(queryOptions);
+      // Roadmap 4.6b. The combined day already worked this out from blocks it was holding anyway;
+      // a per-device page has to ask, so it only asks when there is a rule to ask about.
+      if (this.notCountedCount > 0 && !this.activityStore.combined.active) {
+        await this.activityStore.query_not_counted(queryOptions);
+      }
     },
 
     load_demo: async function () {

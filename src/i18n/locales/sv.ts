@@ -334,6 +334,16 @@ export default {
       allCategorized: 'Allt här är kategoriserat.',
       saveFailed: 'Kunde inte spara kategorin.',
     },
+    notCounted: {
+      open: 'Räknar inte {count} kategorier',
+      hide: 'Dölj det som inte räknas',
+      explain:
+        'Tid som matchar dessa kategorier utesluts från varje summa, överallt. Inget tas bort.',
+      inPeriod: 'räknas inte här',
+      notMeasured: 'Inte uppmätt på den här sidan.',
+      countAgain: 'Räkna den igen',
+      saveFailed: 'Kunde inte ändra regeln.',
+    },
     timeActive: 'Aktiv tid:',
     queryRange: 'Frågeintervall:',
     filters: 'Filter',

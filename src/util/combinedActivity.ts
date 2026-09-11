@@ -41,12 +41,33 @@ export interface CombinedSegment {
   device: string;
   /**
    * The winning activity's own fields, beyond its name (roadmap 4.4i). On Android this carries
-   * `classname` -- the screen inside the app. Exact per block: ⑥ coalesce only glues blocks whose
-   * winning `data` is identical, so a block never spans two screens.
+   * `classname` -- the screen inside the app. The **dominant** one: since 4.5c a block may span
+   * several screens of one app, and this names the one that held it longest. Use {@link shares}
+   * for the breakdown.
    */
   detail?: Record<string, any>;
+  /**
+   * Every distinct screen (or window title) inside this block, with the seconds it held, longest
+   * first (roadmap 4.5c). Fractional seconds, and they sum to the block's own `seconds`.
+   *
+   * This exists because ⑥ coalesce was made *coarser*: it used to require the winning activity's
+   * whole `data` map to be equal, which drew a single stretch of Photos as four blocks the moment
+   * a story was opened and closed. Merging on the app fixes the day view, and would have cost the
+   * per-screen panels their accuracy had the detail not moved here.
+   */
+  shares?: { detail?: Record<string, any>; label?: string; seconds: number }[];
+  /**
+   * Seconds inside this block's span that no watcher actually recorded — holes of a few
+   * milliseconds (occasionally a second or two) that ⑥ and ⑦ drew over so that one stretch draws
+   * as one block. Already excluded from `seconds`; carried so the view can explain the difference
+   * between a block's span and its total.
+   */
+  bridged_seconds?: number;
   unresolved?: boolean;
   ignored?: boolean;
+  /** Roadmap 4.6 — `ignored` because a category rule says this never counts, not because the
+   *  owner answered a question about it. Always arrives alongside `ignored`. */
+  not_counted?: boolean;
   /** The other activities that were running in this window (the losers of the pick). */
   background?: { device: string; label: string }[];
 }
@@ -72,6 +93,14 @@ export interface CombinedActivityResult {
   unresolved_seconds: number;
   /** How many devices actually contributed time. */
   device_count: number;
+  /**
+   * What the owner's *"do not count this"* rules ate, per category, biggest first (roadmap 4.6b).
+   *
+   * Free here, unlike on a per-device page: the combined response still *carries* the blocks a rule
+   * emptied — they draw muted — so the figure is a sum over data already in hand rather than a
+   * second query asking the inverse question.
+   */
+  not_counted: { name: string[]; seconds: number }[];
 }
 
 /** Sum by a key, biggest first — the ordering every "top N" list in Activity expects. */
@@ -118,6 +147,47 @@ function categoryMatcher(classes: Category[], pins?: CategoryPin[]): (label: str
 }
 
 /**
+ * `(app, classname)` rows with exact seconds, summed over every block's {@link
+ * CombinedSegment.shares}.
+ *
+ * Kept separate from {@link topBy} because it sums *within* a segment rather than over segments:
+ * one block can contribute to three rows. Ordering matches `topBy`'s — biggest first — and each
+ * row's timestamp is the first block it appeared in, which is the shape `aw-summary` expects.
+ */
+function screenRows(counted: CombinedSegment[]): IEvent[] {
+  const totals = new Map<
+    string,
+    { app: string; classname: string; seconds: number; first: string }
+  >();
+  for (const s of counted) {
+    const app = s.label || 'unknown';
+    const shares =
+      s.shares && s.shares.length > 0 ? s.shares : [{ detail: s.detail, seconds: s.seconds }];
+    for (const share of shares) {
+      const classname = (share.detail || {}).classname;
+      if (!classname) continue;
+      const id = JSON.stringify([app, classname]);
+      const hit = totals.get(id);
+      if (hit) hit.seconds += share.seconds;
+      else
+        totals.set(id, {
+          app,
+          classname: String(classname),
+          seconds: share.seconds,
+          first: s.start,
+        });
+    }
+  }
+  return Array.from(totals.values())
+    .sort((a, b) => b.seconds - a.seconds)
+    .map(t => ({
+      timestamp: t.first,
+      duration: t.seconds,
+      data: { app: t.app, classname: t.classname, $duration: t.seconds },
+    }));
+}
+
+/**
  * Build the Activity view's inputs from one day of combined segments.
  *
  * `ignored` segments are dropped throughout: an `ignore` decision means *"this time
@@ -144,11 +214,12 @@ export function combinedToActivity(
   // `classname`, so a day of desktop activity simply produces no rows here rather than a panel
   // full of blanks -- which is the difference between "this device does not report screens" and
   // "you used no screens".
-  const title_events = topBy(
-    counted.filter(s => s.detail && s.detail.classname),
-    s => [s.label || 'unknown', String((s.detail || {}).classname)] as [string, string],
-    ([app, classname], seconds) => ({ app, classname, $duration: seconds })
-  );
+  //
+  // Summed from `shares`, not from each block's dominant screen: a block may now cover several
+  // screens of one app, and crediting all of it to the longest would move time between rows. A
+  // response from before 4.5c (or a block that somehow carries no shares) falls back to `detail`,
+  // which is exactly what the block would have carried then.
+  const title_events = screenRows(counted);
 
   const cat_events = topBy(
     counted,
@@ -167,6 +238,20 @@ export function combinedToActivity(
 
   const unresolved = all.filter(s => s.unresolved && !s.ignored);
 
+  // Blocks a *rule* emptied, not ones the owner answered "I was away" about: the two are different
+  // things to see, and only the first belongs to a rule that can be revoked. `excluded_labels` on a
+  // block that still counts is deliberately not added up here — that time is not being eaten, the
+  // excluded app merely stopped being a competitor for it.
+  const notCountedTotals = new Map<string, { name: string[]; seconds: number }>();
+  for (const s of all) {
+    if (!s.not_counted) continue;
+    const name = categoryOf(s.label);
+    const id = JSON.stringify(name);
+    const hit = notCountedTotals.get(id);
+    if (hit) hit.seconds += s.seconds;
+    else notCountedTotals.set(id, { name, seconds: s.seconds });
+  }
+
   return {
     app_events,
     title_events,
@@ -178,6 +263,7 @@ export function combinedToActivity(
     unresolved_count: unresolved.length,
     unresolved_seconds: unresolved.reduce((a, s) => a + s.seconds, 0),
     device_count: new Set(counted.map(s => s.device)).size,
+    not_counted: Array.from(notCountedTotals.values()).sort((a, b) => b.seconds - a.seconds),
   };
 }
 
@@ -291,7 +377,8 @@ export function dayBounds(date: string, startOfDay: string): { start: string; en
  *    `top_bundle_ids` used to be here too, on the grounds that a segment "carries an app label
  *    and nothing finer". That stopped being true in 4.4i: the response now carries the winning
  *    activity's own fields, so Android's `classname` -- the screen inside the app -- reaches the
- *    combined day exactly, one screen per block. `top_titles` stays listed because on Android a
+ *    combined day exactly. Since 4.5c the exactness comes from each block's `shares` rather than
+ *    from one screen per block, which is strictly more accurate. `top_titles` stays listed because on Android a
  *    title *is* the app name (4.4f) and a desktop's real titles would make a panel that is
  *    populated on some days and empty on others for reasons the owner cannot see.
  *  - **Some visualizations read a host's raw buckets directly** (the sunburst clock, the

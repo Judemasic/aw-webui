@@ -246,7 +246,7 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
         div.d-flex.align-items-start
           div.flex-grow-1
             h5.mb-0 {{ segmentTitle(selectedSegment) }}
-            p.when.mb-1 {{ clock(selectedSegment.start) }} – {{ clock(selectedSegment.end) }} · {{ fmt(minutesOf(selectedSegment)) }}
+            p.when.mb-1 {{ clock(selectedSegment.start) }} – {{ clock(selectedSegment.end) }} · {{ fmtDuration(selectedSegment.seconds) }}
             b-badge(:variant="segmentBadge(selectedSegment).variant")
               | {{ segmentBadge(selectedSegment).text }}
           b-button.close-x(v-if="compact" size="sm" variant="outline-secondary" @click="clearSelection") ✕
@@ -272,6 +272,16 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
             :disabled="undoing"
             @click="undoResolution(selectedSegment)"
           ) {{ undoing ? 'Undoing…' : 'Undo' }}
+          //- Roadmap 4.6c. On *any* block, not just a contended one — a settled block used to
+          //- have no action at all, so there was no way to say "that stretch was nothing" about
+          //- time only one device was awake for. Hidden once it already does not count: Undo
+          //- above is the way back, and two buttons that both stop it counting is one too many.
+          b-button.act(
+            v-if="canMarkNotCounted(selectedSegment)"
+            variant="outline-danger"
+            :disabled="marking"
+            @click="markNotCounted(selectedSegment)"
+          ) {{ marking ? 'Saving…' : "Doesn't count" }}
           b-button.act(variant="outline-secondary" @click="detailOpen = !detailOpen")
             | {{ detailOpen ? 'Less' : 'Details' }}
 
@@ -287,6 +297,15 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
               span.dev {{ deviceLabel(sl.device) }}
           //- The combined track is computed, never stored, so there is no combined
           //- event for the editor to open. Say so rather than let it look missing.
+          //- Roadmap 4.5c. One stretch of an app is one block even when it moved between its own
+          //- screens, which is what stopped the day drawing "Photos, Photos, Photos". The screens
+          //- are not lost by that — they are here, with the time each one held.
+          template(v-if="screensOf(selectedSegment).length")
+            label.tool-label.mt-2 Screens — {{ screensOf(selectedSegment).length }}
+            ul.slices
+              li(v-for="(sc, i) in screensOf(selectedSegment)" :key="'sc' + i")
+                span.flex-grow-1 {{ sc.name }}
+                span.dev {{ fmtDuration(sc.seconds) }}
           //- Roadmap 4.5. Rounding that hides things silently is a lie about the day, so a
           //- block that swallowed a sliver names it and says how long it was.
           div.smoothed-note.mt-2(v-if="selectedSegment.smoothed_seconds > 0")
@@ -334,12 +353,23 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
             //- that has to be explained to the person using it has lost.
             b-button(size="sm" :variant="selectedSegment.unresolved ? 'primary' : 'outline-primary'" @click="openResolve")
               | {{ selectedSegment.resolved_by ? 'Change answer' : 'Resolve overlap' }}
+          //- Roadmap 4.6c — the same offer on a wide screen, and on every block rather than only
+          //- the ones the pipeline thought to ask about.
+          div.resolve.mt-2(v-if="canMarkNotCounted(selectedSegment) && !compact")
+            b This time counts as nothing
+            div.small.mb-2
+              | Leaves this stretch out of every total. Nothing is deleted — the device tracks below
+              | keep it exactly as recorded, and #[b Undo] brings it back.
+              |  To stop an app counting #[i everywhere], mark its category instead, under
+              |  ⚙ ▸ Settings ▸ Categorization.
+            b-button(size="sm" variant="outline-danger" :disabled="marking" @click="markNotCounted(selectedSegment)")
+              | {{ marking ? 'Saving…' : "Doesn't count" }}
 
       div(v-else-if="selectedEvent")
         div.d-flex.align-items-start
           div.flex-grow-1
             h5.mb-0 {{ selectedEvent.label }}
-            p.when.mb-1 {{ clock(selectedEvent.start) }} – {{ clock(selectedEvent.end) }} · {{ fmt(minutesOf(selectedEvent)) }}
+            p.when.mb-1 {{ clock(selectedEvent.start) }} – {{ clock(selectedEvent.end) }} · {{ fmtDuration(selectedEvent.seconds) }}
             b-badge(variant="secondary") Raw device event
           b-button.close-x(v-if="compact" size="sm" variant="outline-secondary" @click="clearSelection") ✕
         div.peek-actions.mt-2(v-if="compact")
@@ -391,6 +421,7 @@ import { useCategoryStore } from '~/stores/categories';
 import { get_day_start_with_offset } from '~/util/time';
 import { getClient } from '~/util/awclient';
 import { getCategoryColorForLabel } from '~/util/color';
+import { screenRowName } from '~/util/screenNames';
 import { ulid } from '~/util/ulid';
 import ProportionalTimeline from '~/visualizations/ProportionalTimeline.vue';
 import ResolutionSheet from '~/visualizations/ResolutionSheet.vue';
@@ -435,6 +466,14 @@ interface Segment {
   smoothed_seconds: number;
   /** Roadmap 4.5 — what those slivers were, so the block can say what it swallowed. */
   absorbed_labels: string[];
+  /**
+   * Roadmap 4.5c — every screen (or window title) inside this block and how long it held,
+   * longest first. One entry for most blocks; several when one stretch of an app moved between
+   * its own screens, which used to draw as a repeat of the same app instead.
+   */
+  shares?: { detail?: Record<string, any>; label?: string; seconds: number }[];
+  /** Roadmap 4.5c — seconds of the block's span that no watcher recorded. Never counted. */
+  bridged_seconds?: number;
 }
 interface DeviceEvent {
   start: string;
@@ -471,6 +510,8 @@ export default Vue.extend({
       resolving: null as Segment | null,
       /** Roadmap 4.3 — a revoke is in flight; both Undo buttons go dead while it is. */
       undoing: false,
+      /** Roadmap 4.6c — a "this counts as nothing" post is in flight. */
+      marking: false,
       viewport: { start: 0, end: 24 * 60 },
       windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1024,
       /** Roadmap 4.1b. The ⚙ sheet holding the two fold-outs, on a compact screen. */
@@ -1053,6 +1094,33 @@ export default Vue.extend({
     fmtSeconds(seconds: number): string {
       return seconds < 90 ? `${Math.round(seconds)}s` : this.fmt(seconds / 60);
     },
+    /**
+     * A block's own length, to the second.
+     *
+     * The panel used to round to whole minutes, and the owner hit the obvious wall reading a day of
+     * short blocks: *"maybe you should show the s on the details, right now it only shows the m"* —
+     * the block being asked about was 11 seconds long and the panel said `0m`, which is not a
+     * rounding error so much as a refusal to answer. `fmt` still rounds, because a *total* over a
+     * day has no business claiming a seconds figure; one block does.
+     */
+    fmtDuration(seconds: number): string {
+      const total = Math.round(seconds);
+      const s = total % 60;
+      const m = Math.floor(total / 60) % 60;
+      const h = Math.floor(total / 3600);
+      if (h) return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+      if (m) return `${m}m ${String(s).padStart(2, '0')}s`;
+      return `${s}s`;
+    },
+    /** The screens inside one block, biggest first — empty unless there is more than one to say. */
+    screensOf(seg: Segment): { name: string; seconds: number }[] {
+      const shares = seg.shares || [];
+      if (shares.length < 2) return [];
+      return shares.map(sh => ({
+        name: screenRowName((sh.detail || {}).classname, (sh.detail || {}).app || seg.label),
+        seconds: sh.seconds,
+      }));
+    },
     fmt(minutes: number): string {
       // Round the total, then split it. Flooring the hours and rounding the
       // remainder separately makes 299.6 minutes read "4h 60m", which is what the
@@ -1107,6 +1175,67 @@ export default Vue.extend({
      */
     canResolve(s: Segment): boolean {
       return this.slicesOf(s).length > 1;
+    },
+    /**
+     * Roadmap 4.6c — whether to offer *"this counts as nothing"* on this block.
+     *
+     * Any block qualifies, which is the whole point: the resolution sheet only ever opened on a
+     * *contended* stretch, so a day where one device was awake the whole time had no way to say
+     * that an hour of it was nothing. A block that already counts toward no total is left alone —
+     * `Undo` is the action it wants, and a rule-excluded block (`not_counted`) is not this block's
+     * to change at all, since the rule covers every other block it matches too.
+     */
+    canMarkNotCounted(s: Segment): boolean {
+      return !s.ignored && !s.not_counted && !s.resolved_by;
+    },
+    /**
+     * Roadmap 4.6c — write an `ignore` decision covering exactly this block.
+     *
+     * `scope: once`, deliberately. `always` would turn one tap into a standing rule keyed on
+     * whatever happened to be running, and the owner was explicit that a standing rule is a
+     * *category* rule (4.6a): *"not just that I tap something and it doesn't count"*. This is the
+     * other half — one stretch, this stretch.
+     *
+     * Still a decision and never an edit (**R11**): the stored events are untouched, the per-device
+     * tracks keep showing the time, and the existing tombstone undo takes it straight back.
+     */
+    async markNotCounted(segment: Segment) {
+      if (this.marking || !this.canMarkNotCounted(segment)) return;
+      const key = this.selectedKey;
+      this.marking = true;
+      try {
+        await getClient().req.post('/0/combined/decisions', {
+          id: ulid('d_'),
+          type: 'decision',
+          created_at: new Date().toISOString(),
+          created_by: this.ownDevice,
+          window: { start: segment.start, end: segment.end },
+          // The same signature shape the sheet writes, so R15 can read both alike later: what was
+          // running when this was decided, even though `once` never matches on it.
+          signature: {
+            participants: this.slicesOf(segment).map(sl => ({
+              device_role: this.deviceRole(sl.device),
+              device_uuid: sl.device,
+              app: sl.label,
+              category: null,
+            })),
+          },
+          resolution: {
+            outcome: 'ignore',
+            foreground: null,
+            label: null,
+            deliberate_background: [],
+          },
+          scope: 'once',
+        });
+      } catch (e: any) {
+        this.error = e?.response?.data?.message || e?.message || 'Could not save that.';
+        return;
+      } finally {
+        this.marking = false;
+      }
+      await this.reload();
+      this.restoreSelection(key);
     },
     /** One line naming what the decision did, for the detail panel. */
     resolvedSummary(s: Segment): string {

@@ -296,6 +296,41 @@ export function appQuery(
   return querystr_to_array(code);
 }
 
+/**
+ * How much time the owner's *"do not count this"* rules are eating, per rule (roadmap 4.6b).
+ *
+ * The one number 4.6a could not produce. Once a category is marked `not_counted`, every query on
+ * every screen drops its events before summing — which is exactly the point, and which also means
+ * nothing on the page can say how much was dropped. An exclusion nobody can see is one the owner
+ * will eventually forget and mistrust the day's total over, so this asks the opposite question of
+ * the same events: categorise, then keep **only** the excluded categories and sum them.
+ *
+ * It is the same `canonicalEvents` pipeline with `filter_categories` set to the exclusion list and
+ * the exclusion itself left off, so the two answers cannot drift: whatever the day dropped is what
+ * this counts. A separate query rather than extra keys on the main one because it runs only while
+ * the panel is open, and because a page with no exclusions must not pay for it at all.
+ */
+export function notCountedQuery(
+  params: (DesktopQueryParams | AndroidQueryParams) & { not_counted_categories: string[][] }
+): string[] {
+  const inner = {
+    ...params,
+    // Keep only the excluded categories, and do not exclude them: the inverse of the day's query.
+    filter_categories: params.not_counted_categories,
+    not_counted_categories: undefined,
+  } as DesktopQueryParams | AndroidQueryParams;
+  const code = `
+    ${canonicalEvents(inner)}
+
+    cat_events = sort_by_duration(merge_events_by_keys(events, ["$category"]));
+    app_events = sort_by_duration(merge_events_by_keys(events, ["app"]));
+    app_events = limit_events(app_events, ${default_limit});
+    duration = sum_durations(events);
+    RETURN = {"cat_events": cat_events, "app_events": app_events, "duration": duration};
+  `;
+  return querystr_to_array(code);
+}
+
 // Exact app names (Flatpak app IDs and similar reverse-domain identifiers) used for bucket discovery and as a
 // fallback for names that don't match the regex patterns below. Process name
 // variants (upper/lowercase, spacing, .exe suffix) are handled by
@@ -531,6 +566,7 @@ export default {
   fullDesktopQuery,
   multideviceQuery,
   appQuery,
+  notCountedQuery,
   activityQuery,
   activityQueryAndroid,
   categoryQuery,

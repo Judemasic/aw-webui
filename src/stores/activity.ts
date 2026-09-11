@@ -216,6 +216,20 @@ interface State {
     has_screens: boolean;
   };
 
+  /**
+   * What the owner's *"do not count this"* rules are eating in the period on screen
+   * (roadmap 4.6b).
+   *
+   * `loaded` is what makes the panel honest about the difference between *"nothing was
+   * excluded"* and *"nobody has asked yet"*. On a per-device page the figure costs a second
+   * query, so it is only asked for when there is at least one rule to ask about.
+   */
+  not_counted: {
+    loaded: boolean;
+    categories: { name: string[]; seconds: number }[];
+    total_seconds: number;
+  };
+
   stopwatch: {
     available: boolean;
     top_stopwatches: IEvent[];
@@ -284,6 +298,12 @@ export const useActivityStore = defineStore('activity', {
 
     ios: {
       available: false,
+    },
+
+    not_counted: {
+      loaded: false,
+      categories: [],
+      total_seconds: 0,
     },
 
     combined: {
@@ -522,6 +542,63 @@ export const useActivityStore = defineStore('activity', {
      * combined track carries an app label and nothing finer, so those panels are marked
      * unavailable rather than filled with something plausible.
      */
+    /**
+     * Roadmap 4.6b — how much the exclusion rules ate in this period, on a per-device page.
+     *
+     * Only ever called from the panel that shows it, and only when there is a rule to ask about:
+     * the answer costs a query, and a day with no exclusions must not pay for one. The combined
+     * day never reaches here at all — {@link combined_completed} has already filled the figure in
+     * from blocks it was holding anyway.
+     */
+    async query_not_counted({ timeperiod }: QueryOptions) {
+      const categoryStore = useCategoryStore();
+      const excluded = categoryStore.not_counted_categories;
+      if (!excluded || excluded.length === 0) {
+        this.not_counted_completed([]);
+        return;
+      }
+      const periods = [timeperiodToStr(timeperiod)];
+      const categories = categoryStore.classes_for_query;
+      let q: string[] | undefined;
+      if (this.buckets.android.length > 0) {
+        const iosBucket = this.buckets.android.find((id: string) =>
+          id.startsWith('aw-import-screentime')
+        );
+        q = queries.notCountedQuery({
+          bid_android: (iosBucket || this.buckets.android[0]) as string,
+          isIos: !!iosBucket,
+          categories,
+          filter_categories: [],
+          not_counted_categories: excluded,
+        });
+      } else if (this.buckets.window.length > 0 && this.buckets.afk.length > 0) {
+        q = queries.notCountedQuery({
+          bid_window: this.buckets.window[0],
+          bid_afk: this.buckets.afk[0],
+          filter_afk: true,
+          categories,
+          filter_categories: [],
+          not_counted_categories: excluded,
+        });
+      }
+      if (!q) {
+        // No bucket this query knows how to read. Say "not measured" rather than "nothing", which
+        // would read as a claim that the rules are eating no time.
+        this.not_counted.loaded = false;
+        return;
+      }
+      const data = await getClient().query(periods, q).catch(this.errorHandler);
+      const rows = (data && data[0] && data[0].cat_events) || [];
+      this.not_counted_completed(
+        rows
+          .map((e: IEvent) => ({
+            name: (e.data as any).$category as string[],
+            seconds: e.duration,
+          }))
+          .filter((r: { name: string[] }) => !!r.name)
+      );
+    },
+
     async query_combined_full({ timeperiod, date }: QueryOptions) {
       const settingsStore = useSettingsStore();
       const { start, end } = dayBounds(
@@ -1019,6 +1096,20 @@ export const useActivityStore = defineStore('activity', {
       // Whether this day has any per-screen detail at all, which is what decides if the Top
       // Screens panel has anything to say. A combined day of desktop activity has none.
       this.combined.has_screens = (built.title_events || []).length > 0;
+      // Roadmap 4.6b. No extra request on the combined day -- the muted blocks are already here.
+      // Written straight in rather than through `not_counted_completed`: this mutation declares
+      // `this: State`, which is the plain state shape and does not carry the other actions.
+      const eaten = built.not_counted || [];
+      this.not_counted.categories = eaten;
+      this.not_counted.total_seconds = eaten.reduce((a, c) => a + c.seconds, 0);
+      this.not_counted.loaded = true;
+    },
+
+    /** Roadmap 4.6b — record what the exclusion rules ate on a per-device page. */
+    not_counted_completed(this: State, categories: { name: string[]; seconds: number }[]) {
+      this.not_counted.categories = categories;
+      this.not_counted.total_seconds = categories.reduce((a, c) => a + c.seconds, 0);
+      this.not_counted.loaded = true;
     },
   },
 });

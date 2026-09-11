@@ -57,3 +57,24 @@ function splitCamelCase(s: string): string {
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .trim();
 }
+
+/**
+ * The whole row label for a per-screen row: the app, then the screen inside it.
+ *
+ * The owner's request, on first reading the Top Screens panel: *"can the top screen have the
+ * app before it? like youtube main activity"*. The panel is sorted by time across every app,
+ * so consecutive rows are routinely from different apps, and half a dozen of them read
+ * "Main Activity" with nothing to say whose. The colour already encodes the app, but a colour
+ * is not a name.
+ *
+ * An em dash rather than the ` · ` {@link prettyScreenName} uses for inner classes, so the two
+ * levels of nesting stay distinguishable: `WhatsApp — Calling · Voip Activity V2`.
+ *
+ * The app is left off when the screen name *is* the app -- which is what happens when a
+ * classname is missing altogether -- rather than printing it twice.
+ */
+export function screenRowName(classname?: string | null, app?: string): string {
+  const inside = prettyScreenName(classname, app);
+  if (!app || !inside || inside === app) return inside || app || '';
+  return `${app} — ${inside}`;
+}
