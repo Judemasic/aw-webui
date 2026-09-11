@@ -126,7 +126,7 @@ import 'vue-awesome/icons/times';
 import 'vue-awesome/icons/bars';
 
 import { buildBarchartDataset } from '~/util/datasets';
-import { screenRowName } from '~/util/screenNames';
+import { screenRowName, windowRowName } from '~/util/screenNames';
 import { COMBINED_UNAVAILABLE_TYPES } from '~/util/combinedActivity';
 
 // TODO: Move this somewhere else
@@ -184,11 +184,15 @@ export default {
       ],
       // An iOS bundle id is already readable and is what the owner would search for;
       // an Android class path is not, and is cleaned. The raw value stays on the hover.
-      top_screen_namefunc: e =>
-        this.activityStore.ios.available
+      // A desktop has no screen at all and names the window instead, which is already prose.
+      top_screen_namefunc: e => {
+        if (!e.data.classname) return windowRowName(e.data.title, e.data.app);
+        return this.activityStore.ios.available
           ? e.data.classname
-          : screenRowName(e.data.classname, e.data.app),
-      top_screen_hoverfunc: e => [e.data.app, e.data.classname].filter(Boolean).join('\n'),
+          : screenRowName(e.data.classname, e.data.app);
+      },
+      top_screen_hoverfunc: e =>
+        [e.data.app, e.data.classname || e.data.title].filter(Boolean).join('\n'),
       // TODO: Move this function somewhere else
       top_editor_files_namefunc: e => {
         let f = e.data.file || '';
@@ -224,8 +228,9 @@ export default {
         top_bundle_ids: {
           // Named for what it is on the platform being looked at. On Android it is the
           // Activity class -- the screen inside an app -- and calling that a "bundle id"
-          // or a "window title" would both be wrong.
-          title: this.activityStore.ios.available ? 'Bundle IDs' : 'Top Screens',
+          // or a "window title" would both be wrong. On a desktop it is the window title,
+          // and a combined day can hold both at once.
+          title: this.screenPanelTitle,
           available: this.hasScreens,
         },
         top_domains: {
@@ -338,6 +343,22 @@ export default {
     hasScreens() {
       if (this.activityStore.combined.active) return this.activityStore.combined.has_screens;
       return this.activityStore.ios.available || this.activityStore.android.available;
+    },
+    /**
+     * What to call the panel, decided by what is actually in it.
+     *
+     * A combined day can hold a phone and a PC at once, and they answer "what, inside the app"
+     * with different things. Naming it for one platform would be wrong half the time, so the
+     * rows are asked: any screen at all makes it Screens, titles alone make it Windows.
+     */
+    screenPanelTitle() {
+      if (this.activityStore.ios.available) return 'Bundle IDs';
+      const rows = this.activityStore.window.top_titles || [];
+      const screens = rows.some(e => e.data && e.data.classname);
+      const titles = rows.some(e => e.data && !e.data.classname && e.data.title);
+      if (screens && titles) return 'Top Screens & Windows';
+      if (titles && !screens) return 'Top Windows';
+      return 'Top Screens';
     },
     combinedAllows() {
       return (type: string): boolean =>

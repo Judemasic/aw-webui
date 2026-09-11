@@ -425,3 +425,59 @@ describe('what the exclusion rules ate (roadmap 4.6b)', () => {
     expect(out.not_counted).toEqual([]);
   });
 });
+
+describe('per-window rows on a desktop combined day', () => {
+  // A desktop has no Activity class and names the window instead. Taking `classname` alone meant
+  // every desktop share was dropped and the panel vanished on a PC -- the data was always there.
+  const withTitle = (o: any) =>
+    seg({ detail: { app: o.label || 'Code.exe', title: o.title }, ...o });
+
+  it('splits one app into the windows inside it', () => {
+    const out = combinedToActivity(
+      res([
+        withTitle({ label: 'Code.exe', title: 'lib.rs', seconds: 600 }),
+        withTitle({ label: 'Code.exe', title: 'main.rs', seconds: 1080 }),
+        withTitle({ label: 'Code.exe', title: 'lib.rs', seconds: 300 }),
+      ]),
+      classes
+    );
+    expect(out.title_events.map(e => [e.data.app, e.data.title, e.duration])).toEqual([
+      ['Code.exe', 'main.rs', 1080],
+      ['Code.exe', 'lib.rs', 900],
+    ]);
+    expect(out.app_events.map(e => e.duration)).toEqual([1980]);
+  });
+
+  it('prefers the screen where a device reports both', () => {
+    // A window title changes with every document; a screen does not, so it is the steadier name.
+    const out = combinedToActivity(
+      res([
+        seg({
+          label: 'WhatsApp',
+          detail: { app: 'WhatsApp', classname: 'com.whatsapp.HomeActivity', title: 'Chats' },
+          seconds: 60,
+        }),
+      ]),
+      classes
+    );
+    expect(out.title_events.map(e => [e.data.classname, e.data.title])).toEqual([
+      ['com.whatsapp.HomeActivity', undefined],
+    ]);
+  });
+
+  it('carries a phone and a PC in the same day without merging them', () => {
+    const out = combinedToActivity(
+      res([
+        seg({
+          label: 'WhatsApp',
+          detail: { app: 'WhatsApp', classname: 'com.whatsapp.HomeActivity' },
+          seconds: 60,
+        }),
+        seg({ label: 'Code.exe', detail: { app: 'Code.exe', title: 'lib.rs' }, seconds: 120 }),
+      ]),
+      classes
+    );
+    expect(out.title_events.length).toBe(2);
+    expect(out.title_events.map(e => e.data.app)).toEqual(['Code.exe', 'WhatsApp']);
+  });
+});

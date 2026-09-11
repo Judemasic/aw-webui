@@ -1,4 +1,4 @@
-import { prettyScreenName, screenRowName } from '~/util/screenNames';
+import { prettyScreenName, screenRowName, windowRowName } from '~/util/screenNames';
 
 describe('prettyScreenName', () => {
   it('drops the package and splits the class name into words', () => {
@@ -62,5 +62,30 @@ describe('screenRowName', () => {
 
   it('still names the screen when the app is unknown', () => {
     expect(screenRowName('com.foo.HomeActivity')).toBe('Home Activity');
+  });
+});
+
+describe('windowRowName', () => {
+  it('puts the app before the window, like the Android rows', () => {
+    expect(windowRowName('lib.rs - aw-server-rust', 'Code.exe')).toBe(
+      'Code.exe — lib.rs - aw-server-rust'
+    );
+  });
+
+  it('leaves a title that already ends in the application name alone', () => {
+    // Most desktop windows name their own application, and the prefix would say it twice.
+    expect(windowRowName('Inbox — Mozilla Firefox', 'firefox.exe')).toBe('Inbox — Mozilla Firefox');
+    expect(windowRowName('Explorer', 'explorer.exe')).toBe('Explorer');
+  });
+
+  it('does not split camel case, because a title is already prose', () => {
+    // The Android cleaner would turn this into something worse.
+    expect(windowRowName('ReadMeFirst.md', 'Code.exe')).toBe('Code.exe — ReadMeFirst.md');
+  });
+
+  it('falls back to whichever half it has', () => {
+    expect(windowRowName('', 'Code.exe')).toBe('Code.exe');
+    expect(windowRowName(null, 'Code.exe')).toBe('Code.exe');
+    expect(windowRowName('Untitled')).toBe('Untitled');
   });
 });

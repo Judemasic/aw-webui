@@ -78,3 +78,27 @@ export function screenRowName(classname?: string | null, app?: string): string {
   if (!app || !inside || inside === app) return inside || app || '';
   return `${app} — ${inside}`;
 }
+
+/**
+ * The same row, for a platform that names a window rather than a screen.
+ *
+ * A window title is already prose written for a person, so unlike an Android class path there is
+ * nothing to clean: splitting camel case here would mangle `README.md — Visual Studio Code` into
+ * something worse. The app prefix is the same idea as {@link screenRowName}'s, for the same
+ * reason -- the panel is sorted by time across every app, so neighbouring rows rarely share one.
+ *
+ * Many desktop titles already end in the application's own name, which is where the suffix check
+ * comes in: `Inbox — Mozilla Firefox` should not become `firefox.exe — Inbox — Mozilla Firefox`.
+ */
+export function windowRowName(title?: string | null, app?: string): string {
+  const inside = (title || '').trim();
+  if (!inside) return app || '';
+  if (!app) return inside;
+
+  const bare = app.replace(/\.exe$/i, '').trim();
+  const lower = inside.toLowerCase();
+  if (inside === app || lower === bare.toLowerCase() || lower.endsWith(` ${bare.toLowerCase()}`)) {
+    return inside;
+  }
+  return `${app} — ${inside}`;
+}

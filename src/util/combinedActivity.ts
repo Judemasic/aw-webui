@@ -162,8 +162,14 @@ function categoryMatcher(classes: Category[], pins?: CategoryPin[]): (label: str
 }
 
 /**
- * `(app, classname)` rows with exact seconds, summed over every block's {@link
- * CombinedSegment.shares}.
+ * Rows for "what, inside the app" — `(app, classname)` on Android, `(app, title)` on a desktop —
+ * with exact seconds, summed over every block's {@link CombinedSegment.shares}.
+ *
+ * The question is the same on both platforms and only the field carrying the answer differs:
+ * Android names the Activity class, a desktop names the window title, and neither has the other.
+ * This used to take `classname` alone and `continue` when it was missing, which meant every
+ * Windows and macOS share was discarded and a desktop combined day showed no panel at all — the
+ * data was there, in `detail`, and simply never read.
  *
  * Kept separate from {@link topBy} because it sums *within* a segment rather than over segments:
  * one block can contribute to three rows. Ordering matches `topBy`'s — biggest first — and each
@@ -172,22 +178,27 @@ function categoryMatcher(classes: Category[], pins?: CategoryPin[]): (label: str
 function screenRows(counted: CombinedSegment[]): IEvent[] {
   const totals = new Map<
     string,
-    { app: string; classname: string; seconds: number; first: string }
+    { app: string; classname?: string; title?: string; seconds: number; first: string }
   >();
   for (const s of counted) {
     const app = s.label || 'unknown';
     const shares =
       s.shares && s.shares.length > 0 ? s.shares : [{ detail: s.detail, seconds: s.seconds }];
     for (const share of shares) {
-      const classname = (share.detail || {}).classname;
-      if (!classname) continue;
-      const id = JSON.stringify([app, classname]);
+      const detail = share.detail || {};
+      // Android's screen first: where a device reports both, the class is the more stable
+      // name -- a window title changes with every document, a screen does not.
+      const classname = detail.classname ? String(detail.classname) : '';
+      const title = !classname && detail.title ? String(detail.title) : '';
+      if (!classname && !title) continue;
+      const id = JSON.stringify([app, classname, title]);
       const hit = totals.get(id);
       if (hit) hit.seconds += share.seconds;
       else
         totals.set(id, {
           app,
-          classname: String(classname),
+          classname: classname || undefined,
+          title: title || undefined,
           seconds: share.seconds,
           first: s.start,
         });
@@ -198,7 +209,12 @@ function screenRows(counted: CombinedSegment[]): IEvent[] {
     .map(t => ({
       timestamp: t.first,
       duration: t.seconds,
-      data: { app: t.app, classname: t.classname, $duration: t.seconds },
+      data: {
+        app: t.app,
+        ...(t.classname ? { classname: t.classname } : {}),
+        ...(t.title ? { title: t.title } : {}),
+        $duration: t.seconds,
+      },
     }));
 }
 
