@@ -378,6 +378,43 @@ describe('what the exclusion rules ate (roadmap 4.6b)', () => {
     expect(out.not_counted).toEqual([]);
   });
 
+  it('counts an excluded sliver that smoothing drew inside a block that counts', () => {
+    // Roadmap 4.5d. The block is vim, it counts, and its own `seconds` is 600 -- but drawn inside
+    // it are 30 seconds of Slack that a rule excludes. Reading the block would report the rule as
+    // eating nothing at all; the shares carry the verdict with the seconds.
+    const out = combinedToActivity(
+      res([
+        seg({
+          label: 'vim',
+          seconds: 600,
+          shares: [
+            { label: 'vim', seconds: 600 },
+            { label: 'Slack', seconds: 30, not_counted: true },
+          ],
+        }),
+      ]),
+      classes
+    );
+    expect(out.not_counted).toEqual([{ name: ['Comms'], seconds: 30 }]);
+  });
+
+  it('still ignores an answered block when it carries shares', () => {
+    // `ignored` without `not_counted` is the owner saying "I was away", which has its own undo.
+    // The shares path must not quietly start listing those as a revocable rule.
+    const out = combinedToActivity(
+      res([
+        seg({
+          label: 'Slack',
+          seconds: 0,
+          ignored: true,
+          shares: [{ label: 'Slack', seconds: 100, not_counted: true }],
+        }),
+      ]),
+      classes
+    );
+    expect(out.not_counted).toEqual([]);
+  });
+
   it('does not count time an excluded app merely competed for', () => {
     // The block still counts -- the launcher simply stopped being a competitor for it -- so the
     // rule is not eating this time and must not be shown as if it were.

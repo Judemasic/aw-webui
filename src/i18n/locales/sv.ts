@@ -334,6 +334,9 @@ export default {
       allCategorized: 'Allt här är kategoriserat.',
       saveFailed: 'Kunde inte spara kategorin.',
     },
+    sunburst: {
+      backToAll: 'Tillbaka till alla',
+    },
     notCounted: {
       open: 'Räknar inte {count} kategorier',
       hide: 'Dölj det som inte räknas',

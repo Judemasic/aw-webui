@@ -330,6 +330,9 @@ export default {
       allCategorized: 'Everything here is categorised.',
       saveFailed: 'Could not save that category.',
     },
+    sunburst: {
+      backToAll: 'Back to all',
+    },
     notCounted: {
       open: 'Not counting {count} categories',
       hide: 'Hide what is not counted',

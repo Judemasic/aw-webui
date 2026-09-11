@@ -331,6 +331,9 @@ export default {
       allCategorized: 'Hier ist alles kategorisiert.',
       saveFailed: 'Diese Kategorie konnte nicht gespeichert werden.',
     },
+    sunburst: {
+      backToAll: 'Zurück zu allen',
+    },
     notCounted: {
       open: '{count} Kategorien zählen nicht',
       hide: 'Nicht gezählte Zeit ausblenden',

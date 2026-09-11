@@ -327,6 +327,9 @@ export default {
       allCategorized: 'Тут усе категоризовано.',
       saveFailed: 'Не вдалося зберегти цю категорію.',
     },
+    sunburst: {
+      backToAll: 'Назад до всіх',
+    },
     notCounted: {
       open: 'Не враховується категорій: {count}',
       hide: 'Сховати те, що не враховується',

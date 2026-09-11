@@ -319,6 +319,9 @@ export default {
       allCategorized: '这里的内容都已分类。',
       saveFailed: '无法保存该类别。',
     },
+    sunburst: {
+      backToAll: '返回全部',
+    },
     notCounted: {
       open: '有 {count} 个分类不计入',
       hide: '隐藏不计入的时间',

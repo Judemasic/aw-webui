@@ -123,10 +123,17 @@ const NARROW_PX = 640;
 const WIDE_PX = 980;
 
 // Zoom bounds, in pixels per hour. The floor is roughly a whole day on a phone
-// screen; the ceiling is where a minute is wide enough that zooming further just
-// wastes scroll. Pinch and ctrl-wheel both clamp to this.
+// screen. Pinch and ctrl-wheel both clamp to this.
+//
+// The ceiling used to be 480 -- eight pixels to the minute -- on the reasoning that a
+// minute wide enough to read is as far as anyone needs to go. That was wrong about what
+// the owner needs to look at. A two-second block is a *seventh of a pixel* at 480, so the
+// exact case they went looking for (two Good Lock blocks either side of an eighteen-second
+// gap, and the question of whether they were really one visit) could not be examined at
+// any zoom the timeline offered. 7200 is two pixels to the second, which makes a
+// one-second block visible and a two-second block tappable.
 const MIN_PX_PER_HOUR = 10;
-const MAX_PX_PER_HOUR = 480;
+const MAX_PX_PER_HOUR = 7200;
 
 const clampZoom = (v: number) => Math.max(MIN_PX_PER_HOUR, Math.min(MAX_PX_PER_HOUR, v));
 

@@ -43,6 +43,19 @@ import { Category } from '~/util/classes';
 
 export default {
   name: 'aw-not-counted',
+  props: {
+    /**
+     * Per-category excluded seconds measured by the caller, instead of the Activity store's.
+     *
+     * The combined day fetches its own timeline and never runs the per-device query the store
+     * holds, so without this the panel could only say "not measured on this page" in the one view
+     * that actually *draws* the excluded blocks. `null` keeps the store as the source.
+     */
+    categories: {
+      type: Array as () => { name: string[]; seconds: number }[] | null,
+      default: null,
+    },
+  },
   data() {
     return {
       busy: false,
@@ -54,7 +67,7 @@ export default {
     ...mapState(useCategoryStore, ['classes']),
     /** Whether the time figures on screen were actually worked out for this period. */
     measured(): boolean {
-      return this.not_counted.loaded;
+      return this.categories !== null || this.not_counted.loaded;
     },
     /**
      * One row per category carrying the flag, biggest eater first.
@@ -66,7 +79,7 @@ export default {
       const flagged = (this.classes as Category[]).filter(
         c => c.data && (c.data as any).not_counted === true
       );
-      const measuredRows = this.not_counted.categories || [];
+      const measuredRows = this.categories || this.not_counted.categories || [];
       return flagged
         .map(c => ({
           id: c.id as number,

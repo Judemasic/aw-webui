@@ -115,6 +115,12 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
             b-form-checkbox(v-model="view.fit" size="sm") Fit day to {{ fitAxisWord }}
   div.tools-backdrop(v-if="compact && toolsOpen" @click="toolsOpen = false")
 
+  //- Roadmap 4.6b's panel, reachable from the day it applies to.
+  b-collapse.mb-2(v-model="excludedOpen")
+    div.tools
+      div.tool-panel
+        aw-not-counted(:categories="excludedByCategory" @changed="reload")
+
   div.alert.alert-danger(v-if="error") {{ error }}
 
   div.summary-strip.mb-1(v-if="data" :class="{ compact }")
@@ -130,6 +136,12 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
     div.stat(:class="{ flag: contendedCount > 0 }")
       span.v {{ contendedCount }}
       span.k unresolved
+    //- Roadmap 4.6b. A rule that stops time counting has to be visible in the view that *draws*
+    //- the excluded blocks, not only on the per-device Activity page. Tapping opens the same
+    //- panel, with the same one-tap way to revoke a rule.
+    div.stat.tappable(v-if="excludedSeconds > 0" @click="excludedOpen = !excludedOpen")
+      span.v {{ fmt(excludedSeconds / 60) }}
+      span.k excluded ⌄
 
   //- Whole day at a glance. Vertical scroll trades this away; the strip buys it back.
   div.minimap(
@@ -303,9 +315,19 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
           template(v-if="screensOf(selectedSegment).length")
             label.tool-label.mt-2 Screens — {{ screensOf(selectedSegment).length }}
             ul.slices
-              li(v-for="(sc, i) in screensOf(selectedSegment)" :key="'sc' + i")
+              li(v-for="(sc, i) in screensOf(selectedSegment)" :key="'sc' + i" :class="{ uncounted: sc.notCounted }")
                 span.flex-grow-1 {{ sc.name }}
                 span.dev {{ fmtDuration(sc.seconds) }}
+          //- Roadmap 4.5d. Smoothing draws over a short excluded detour so a stretch reads as one
+          //- stretch, and those seconds are still in none of the totals. Both halves have to be
+          //- said, or the block looks like it is quietly counting time a rule excluded.
+          div.smoothed-note.mt-2(v-if="uncountedOf(selectedSegment) > 0")
+            b Not counted
+            div.small
+              | {{ fmtDuration(uncountedOf(selectedSegment)) }} of
+              |  {{ uncountedLabels(selectedSegment) }} is drawn inside this block and left out of
+              |  every total — this block's #[b {{ fmtDuration(selectedSegment.seconds) }}] does not
+              |  include it.
           //- Roadmap 4.5. Rounding that hides things silently is a lie about the day, so a
           //- block that swallowed a sliver names it and says how long it was.
           div.smoothed-note.mt-2(v-if="selectedSegment.smoothed_seconds > 0")
@@ -422,6 +444,7 @@ import { get_day_start_with_offset } from '~/util/time';
 import { getClient } from '~/util/awclient';
 import { getCategoryColorForLabel } from '~/util/color';
 import { screenRowName } from '~/util/screenNames';
+import { notCountedByCategory } from '~/util/combinedActivity';
 import { ulid } from '~/util/ulid';
 import ProportionalTimeline from '~/visualizations/ProportionalTimeline.vue';
 import ResolutionSheet from '~/visualizations/ResolutionSheet.vue';
@@ -471,9 +494,21 @@ interface Segment {
    * longest first. One entry for most blocks; several when one stretch of an app moved between
    * its own screens, which used to draw as a repeat of the same app instead.
    */
-  shares?: { detail?: Record<string, any>; label?: string; seconds: number }[];
+  shares?: {
+    detail?: Record<string, any>;
+    label?: string;
+    seconds: number;
+    /**
+     * Roadmap 4.5d — whether these seconds count toward nothing. Per share, because smoothing may
+     * now draw a short excluded detour inside a block that counts, so that a stretch of one app
+     * reads as one stretch; the seconds stay out of every total either way.
+     */
+    not_counted?: boolean;
+  }[];
   /** Roadmap 4.5c — seconds of the block's span that no watcher recorded. Never counted. */
   bridged_seconds?: number;
+  /** Roadmap 4.5d — seconds drawn inside this block that count toward nothing. */
+  uncounted_seconds?: number;
 }
 interface DeviceEvent {
   start: string;
@@ -491,7 +526,11 @@ interface DeviceTrack {
 
 export default Vue.extend({
   name: 'CombinedTimeline',
-  components: { ProportionalTimeline, ResolutionSheet },
+  components: {
+    ProportionalTimeline,
+    ResolutionSheet,
+    'aw-not-counted': () => import('~/components/NotCountedPanel.vue'),
+  },
   data() {
     return {
       date: moment().format('YYYY-MM-DD'),
@@ -516,6 +555,8 @@ export default Vue.extend({
       windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1024,
       /** Roadmap 4.1b. The ⚙ sheet holding the two fold-outs, on a compact screen. */
       toolsOpen: false,
+      /** Roadmap 4.6b — the exclusions panel, closed until the `excluded` stat is tapped. */
+      excludedOpen: false,
       /** Roadmap 4.1b. Stage two of the detail sheet — the peek is the default. */
       detailOpen: false,
       /**
@@ -570,10 +611,16 @@ export default Vue.extend({
         { text: '30s', value: 30 },
         { text: '60s', value: 60 },
       ],
+      // Roughly a decade apart at the top end on purpose: the useful zooms are not evenly
+      // spaced. Everything up to 'Close' is for reading a day's shape; 'Minutes' and
+      // 'Seconds' are for the other job entirely -- looking at one short block and its
+      // neighbours closely enough to decide whether they were really one visit.
       zoomPresets: [
         { text: 'Day', value: 34 },
         { text: 'Normal', value: 64 },
         { text: 'Close', value: 128 },
+        { text: 'Minutes', value: 900 },
+        { text: 'Seconds', value: 3600 },
       ],
       modeOptions: [
         { text: 'Last duration', value: 'last_duration' },
@@ -740,6 +787,22 @@ export default Vue.extend({
     },
     combinedMinutes(): number {
       return this.segments.reduce((n, s) => n + s.seconds / 60, 0);
+    },
+    /**
+     * What the day's exclusion rules ate, from the server's own figure rather than a re-sum of the
+     * rows — truncated once, the same reason `combined_seconds` is taken whole (roadmap 4.5b).
+     */
+    excludedSeconds(): number {
+      return (this.data && this.data.excluded_seconds) || 0;
+    },
+    /** The same figure broken down per category, for roadmap 4.6b's panel. */
+    excludedByCategory(): { name: string[]; seconds: number }[] {
+      const totals = notCountedByCategory(
+        this.segments,
+        this.categoryStore.classes || [],
+        this.categoryStore.category_pins
+      );
+      return Array.from(totals.values()).sort((a, b) => b.seconds - a.seconds);
     },
     deviceMinutes(): number {
       return this.shownDevices.reduce((n, d) => n + d.total_seconds / 60, 0);
@@ -1113,13 +1176,32 @@ export default Vue.extend({
       return `${s}s`;
     },
     /** The screens inside one block, biggest first — empty unless there is more than one to say. */
-    screensOf(seg: Segment): { name: string; seconds: number }[] {
+    screensOf(seg: Segment): { name: string; seconds: number; notCounted: boolean }[] {
       const shares = seg.shares || [];
       if (shares.length < 2) return [];
+      const own = !!(seg.ignored || seg.not_counted);
       return shares.map(sh => ({
         name: screenRowName((sh.detail || {}).classname, (sh.detail || {}).app || seg.label),
         seconds: sh.seconds,
+        // Roadmap 4.5d. A share that counts differently from the block it sits in — the launcher
+        // second inside a stretch of Photos. Marked rather than hidden: the whole point of drawing
+        // over it is that the day reads right, and the whole point of saying so is that an
+        // exclusion the owner set never becomes invisible.
+        notCounted: !!sh.not_counted && !own,
       }));
+    },
+    /** Seconds drawn inside a block that count toward nothing (roadmap 4.5d). */
+    uncountedOf(seg: Segment): number {
+      if (seg.ignored || seg.not_counted) return 0;
+      return (seg.shares || []).reduce((a, sh) => a + (sh.not_counted ? sh.seconds : 0), 0);
+    },
+    /** Which activities those uncounted seconds belonged to, for the note that explains them. */
+    uncountedLabels(seg: Segment): string {
+      if (seg.ignored || seg.not_counted) return '';
+      const names = Array.from(
+        new Set((seg.shares || []).filter(sh => sh.not_counted).map(sh => sh.label || seg.label))
+      );
+      return names.join(', ');
     },
     fmt(minutes: number): string {
       // Round the total, then split it. Flooring the hours and rounding the
@@ -1749,6 +1831,16 @@ details.tools {
     &.flag .v {
       color: #b4541f;
     }
+    // The one stat that opens something. Excluded time is the figure most likely to be
+    // questioned -- "why is my day short?" -- so the answer is one tap from the number.
+    &.tappable {
+      cursor: pointer;
+      user-select: none;
+
+      &:hover .k {
+        opacity: 1;
+      }
+    }
     .v {
       display: block;
       font-family: monospace;
@@ -2110,6 +2202,17 @@ details.tools {
     &.fg {
       border-left-width: 3px;
       border-left-color: currentColor;
+    }
+    // Roadmap 4.5d: drawn inside this block, counted in nothing. Dimmed and struck through so it
+    // reads as time that is *there* but not in the figure beside it.
+    &.uncounted {
+      opacity: 0.55;
+      font-style: italic;
+      border-style: dashed;
+
+      .dev {
+        text-decoration: line-through;
+      }
     }
     .dev {
       font-family: monospace;

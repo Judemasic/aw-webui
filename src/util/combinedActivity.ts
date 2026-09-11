@@ -55,7 +55,18 @@ export interface CombinedSegment {
    * a story was opened and closed. Merging on the app fixes the day view, and would have cost the
    * per-screen panels their accuracy had the detail not moved here.
    */
-  shares?: { detail?: Record<string, any>; label?: string; seconds: number }[];
+  shares?: {
+    detail?: Record<string, any>;
+    label?: string;
+    seconds: number;
+    /**
+     * Whether these seconds count toward nothing (roadmap 4.5d). Carried per share because
+     * smoothing is now allowed to draw an excluded sliver inside a block that counts -- so a
+     * launcher visit no longer splits a stretch of Photos in two, while its seconds stay out of
+     * every total. The block's own `not_counted` describes the share that won it, not all of them.
+     */
+    not_counted?: boolean;
+  }[];
   /**
    * Seconds inside this block's span that no watcher actually recorded — holes of a few
    * milliseconds (occasionally a second or two) that ⑥ and ⑦ drew over so that one stretch draws
@@ -63,6 +74,8 @@ export interface CombinedSegment {
    * between a block's span and its total.
    */
   bridged_seconds?: number;
+  /** Seconds drawn inside this block that count toward nothing (roadmap 4.5d). */
+  uncounted_seconds?: number;
   unresolved?: boolean;
   ignored?: boolean;
   /** Roadmap 4.6 — `ignored` because a category rule says this never counts, not because the
@@ -75,6 +88,8 @@ export interface CombinedSegment {
 export interface CombinedTimelineResponse {
   combined: CombinedSegment[];
   combined_seconds: number;
+  /** Everything an exclusion rule or an "I was away" answer said counts toward nothing. */
+  excluded_seconds?: number;
   devices?: { device: string; seconds?: number; hostname?: string; is_own?: boolean }[];
 }
 
@@ -188,6 +203,62 @@ function screenRows(counted: CombinedSegment[]): IEvent[] {
 }
 
 /**
+ * How much each category's *"do not count this"* rule ate, over a set of combined blocks.
+ *
+ * Split out of {@link combinedToActivity} so the combined timeline can feed roadmap 4.6b's panel
+ * directly: that view fetches its own day and never runs the per-device query the Activity store
+ * holds, so without this the panel is mounted in the one place that draws the excluded blocks and
+ * can only say "not measured on this page".
+ */
+export function notCountedByCategory(
+  all: CombinedSegment[],
+  classes: Category[],
+  pins?: CategoryPin[]
+): Map<string, { name: string[]; seconds: number }> {
+  const categoryOf = categoryMatcher(classes, pins);
+  // Blocks a *rule* emptied, not ones the owner answered "I was away" about: the two are different
+  // things to see, and only the first belongs to a rule that can be revoked. `excluded_labels` on a
+  // block that still counts is deliberately not added up here — that time is not being eaten, the
+  // excluded app merely stopped being a competitor for it.
+  const notCountedTotals = new Map<string, { name: string[]; seconds: number }>();
+  for (const s of all) {
+    // Summed from the **shares**, not from the block. Since 4.5d a block's own `seconds` is only
+    // the part of it that counts, so a fully excluded block contributes zero to it -- reading the
+    // block would have quietly reported every exclusion as eating no time at all. The shares carry
+    // the verdict with the seconds, which is exactly the question being asked here, and it works
+    // in both directions: an excluded sliver drawn inside a stretch of Photos is counted here, and
+    // a counted sliver drawn inside an excluded block is not.
+    const shares = s.shares && s.shares.length ? s.shares : null;
+    const add = (label: string, seconds: number) => {
+      if (seconds <= 0) return;
+      const name = categoryOf(label);
+      const id = JSON.stringify(name);
+      const hit = notCountedTotals.get(id);
+      if (hit) hit.seconds += seconds;
+      else notCountedTotals.set(id, { name, seconds });
+    };
+    // Still only rules, never an "I was away" answer -- the two are different things to see, and
+    // only a rule can be revoked from this panel. A block the owner answered away carries `ignored`
+    // without `not_counted`, and smoothing cannot put its shares anywhere else: joining requires an
+    // equal `resolved_by`, so an answered block only ever merges with blocks of the same answer.
+    // So an excluded share is a rule's whenever its block is rule-excluded or counts at all.
+    const ruleExcluded = !s.ignored || s.not_counted;
+    if (shares) {
+      if (ruleExcluded) {
+        for (const sh of shares) {
+          if (sh.not_counted) add(sh.label || s.label, sh.seconds);
+        }
+      }
+    } else if (s.not_counted) {
+      // A server too old to send shares. The block's own figure is the best available answer.
+      add(s.label, s.seconds);
+    }
+  }
+
+  return notCountedTotals;
+}
+
+/**
  * Build the Activity view's inputs from one day of combined segments.
  *
  * `ignored` segments are dropped throughout: an `ignore` decision means *"this time
@@ -238,19 +309,7 @@ export function combinedToActivity(
 
   const unresolved = all.filter(s => s.unresolved && !s.ignored);
 
-  // Blocks a *rule* emptied, not ones the owner answered "I was away" about: the two are different
-  // things to see, and only the first belongs to a rule that can be revoked. `excluded_labels` on a
-  // block that still counts is deliberately not added up here — that time is not being eaten, the
-  // excluded app merely stopped being a competitor for it.
-  const notCountedTotals = new Map<string, { name: string[]; seconds: number }>();
-  for (const s of all) {
-    if (!s.not_counted) continue;
-    const name = categoryOf(s.label);
-    const id = JSON.stringify(name);
-    const hit = notCountedTotals.get(id);
-    if (hit) hit.seconds += s.seconds;
-    else notCountedTotals.set(id, { name, seconds: s.seconds });
-  }
+  const notCountedTotals = notCountedByCategory(all, classes, pins);
 
   return {
     app_events,
