@@ -29,6 +29,7 @@ import {
 } from '~/util/desktopQuerySplit';
 import {
   COMBINED_HOST,
+  combinedByPeriod,
   combinedToActivity,
   dayBounds,
   CombinedActivityResult,
@@ -46,6 +47,38 @@ function timeperiodsStrsDaysOfPeriod(timeperiod: TimePeriod): string[] {
 
 function timeperiodsStrsMonthsOfPeriod(timeperiod: TimePeriod): string[] {
   return timeperiodsMonthsOfPeriod(timeperiod).map(timeperiodToStr);
+}
+
+/**
+ * The sub-periods a timeperiod's bars are drawn from: hours of a day, days of a week or
+ * month, months of a year.
+ *
+ * Shared by the per-host category query and the combined day's client-side slice
+ * (roadmap 4.4g) so the two cannot drift into bucketing the same day differently --
+ * which is exactly the class of bug 4.4d was.
+ *
+ * Periods that have not started yet are dropped: a bar for an hour that is still in the
+ * future is not empty, it is unasked.
+ */
+function subPeriodsOf(timeperiod: TimePeriod): string[] {
+  const count = timeperiod.length[0];
+  const res = timeperiod.length[1];
+  let periods: string[];
+  if (res.startsWith('day') && count == 1) {
+    periods = timeperiodsStrsHoursOfPeriod(timeperiod);
+  } else if (
+    res.startsWith('day') ||
+    (res.startsWith('week') && count == 1) ||
+    (res.startsWith('month') && count == 1)
+  ) {
+    periods = timeperiodsStrsDaysOfPeriod(timeperiod);
+  } else if (res.startsWith('year') && count == 1) {
+    periods = timeperiodsStrsMonthsOfPeriod(timeperiod);
+  } else {
+    console.error(`Unknown timeperiod length: ${timeperiod.length}`);
+    periods = [];
+  }
+  return periods.filter(period => new Date(period.split('/')[0]) < new Date());
 }
 
 function timeperiodStrsAroundTimeperiod(timeperiod: TimePeriod): string[] {
@@ -393,11 +426,12 @@ export const useActivityStore = defineStore('activity', {
           await this.query_editor_completed();
         }
 
-        // Perform this last, as it takes the longest
+        // Perform this last, as it takes the longest.
+        // The combined day is not in here: its bars were already sliced out of the one
+        // response query_combined_full fetched, and calling the completion again would
+        // clear them.
         if (!isCombined && (this.window.available || this.android.available)) {
           await this.query_category_time_by_period(query_options);
-        } else if (isCombined) {
-          this.query_category_time_by_period_completed();
         }
       } else {
         console.warn(
@@ -506,6 +540,17 @@ export const useActivityStore = defineStore('activity', {
         duration: built.duration,
       });
       this.combined_completed(built, res.data as CombinedTimelineResponse);
+
+      // The Timeline barchart's bars, sliced out of the same response rather than
+      // fetched again -- see combinedByPeriod (roadmap 4.4g).
+      this.query_category_time_by_period_completed({
+        by_period: combinedByPeriod(
+          res.data as CombinedTimelineResponse,
+          subPeriodsOf(timeperiod),
+          categoryStore.classes,
+          categoryStore.category_pins
+        ),
+      });
     },
 
     async query_multidevice_full(
@@ -617,28 +662,7 @@ export const useActivityStore = defineStore('activity', {
       always_active_pattern,
     }: QueryOptions & { dontQueryInactive: boolean }) {
       // TODO: Needs to be adapted for Android
-      let periods: string[];
-      const count = timeperiod.length[0];
-      const res = timeperiod.length[1];
-      if (res.startsWith('day') && count == 1) {
-        // If timeperiod is a single day, we query the individual hours
-        periods = timeperiodsStrsHoursOfPeriod(timeperiod);
-      } else if (
-        res.startsWith('day') ||
-        (res.startsWith('week') && count == 1) ||
-        (res.startsWith('month') && count == 1)
-      ) {
-        // If timeperiod is several days, or a single week/month, we query the individual days
-        periods = timeperiodsStrsDaysOfPeriod(timeperiod);
-      } else if (timeperiod.length[1].startsWith('year') && timeperiod.length[0] == 1) {
-        // If timeperiod a single year, we query the individual months
-        periods = timeperiodsStrsMonthsOfPeriod(timeperiod);
-      } else {
-        console.error(`Unknown timeperiod length: ${timeperiod.length}`);
-      }
-
-      // Filter out periods that start in the future
-      periods = periods.filter(period => new Date(period.split('/')[0]) < new Date());
+      const periods = subPeriodsOf(timeperiod);
 
       const signal = getClient().controller.signal;
       let cancelled = false;

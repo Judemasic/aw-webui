@@ -1,5 +1,7 @@
 import {
   COMBINED_HOST,
+  COMBINED_UNAVAILABLE_TYPES,
+  combinedByPeriod,
   combinedToActivity,
   dayBounds,
   CombinedTimelineResponse,
@@ -132,5 +134,100 @@ describe('dayBounds', () => {
 describe('COMBINED_HOST', () => {
   it('is a stable sentinel the route and the nav both use', () => {
     expect(COMBINED_HOST).toBe('combined');
+  });
+});
+
+describe('combinedByPeriod', () => {
+  // Hours of a 04:00-offset day, as the store's subPeriodsOf writes them.
+  const hours = (from: number, to: number) =>
+    Array.from({ length: to - from }, (_, i) => {
+      const h = String(from + i).padStart(2, '0');
+      const next = String(from + i + 1).padStart(2, '0');
+      return `2026-09-10T${h}:00:00Z/2026-09-10T${next}:00:00Z`;
+    });
+
+  it('puts a segment in the hour it happened in', () => {
+    const out = combinedByPeriod(res([seg({ seconds: 600 })]), hours(8, 11), classes);
+    const secondsIn = (p: string) => out[p].cat_events.reduce((a, e) => a + e.duration, 0);
+    expect(secondsIn(hours(9, 10)[0])).toBeCloseTo(600);
+    expect(secondsIn(hours(8, 9)[0])).toBe(0);
+  });
+
+  it('splits a segment that spans an hour boundary, rather than picking a side', () => {
+    // 09:50 -> 10:10, twenty minutes, ten of them in each hour.
+    const out = combinedByPeriod(
+      res([
+        seg({
+          start: '2026-09-10T09:50:00Z',
+          end: '2026-09-10T10:10:00Z',
+          seconds: 1200,
+        }),
+      ]),
+      hours(9, 11),
+      classes
+    );
+    const secondsIn = (p: string) => out[p].cat_events.reduce((a, e) => a + e.duration, 0);
+    expect(secondsIn(hours(9, 10)[0])).toBeCloseTo(600);
+    expect(secondsIn(hours(10, 11)[0])).toBeCloseTo(600);
+  });
+
+  it('keeps the bars summing to the day total', () => {
+    // The property that matters: whatever the boundaries do to individual segments,
+    // the chart and the day's "Time active" figure have to agree.
+    const day = res([
+      seg({ start: '2026-09-10T08:30:00Z', end: '2026-09-10T09:30:00Z', seconds: 3600 }),
+      seg({
+        start: '2026-09-10T09:30:00Z',
+        end: '2026-09-10T11:45:00Z',
+        seconds: 8100,
+        label: 'Slack',
+      }),
+      seg({ start: '2026-09-10T11:45:00Z', end: '2026-09-10T12:00:00Z', seconds: 900 }),
+    ]);
+    const out = combinedByPeriod(day, hours(0, 24), classes);
+    const total = Object.values(out)
+      .flatMap(p => p.cat_events)
+      .reduce((a, e) => a + e.duration, 0);
+    expect(total).toBeCloseTo(day.combined_seconds);
+  });
+
+  it('leaves ignored time out of every bar', () => {
+    const out = combinedByPeriod(
+      res([seg({ seconds: 600, ignored: true }), seg({ seconds: 300 })]),
+      hours(9, 10),
+      classes
+    );
+    expect(out[hours(9, 10)[0]].cat_events.reduce((a, e) => a + e.duration, 0)).toBeCloseTo(300);
+  });
+
+  it('stacks a bar by category, biggest first', () => {
+    const out = combinedByPeriod(
+      res([seg({ label: 'Slack', seconds: 300 }), seg({ label: 'vim', seconds: 900 })]),
+      hours(9, 10),
+      classes
+    );
+    expect(out[hours(9, 10)[0]].cat_events.map(e => e.data.$category)).toEqual([
+      ['Work'],
+      ['Comms'],
+    ]);
+  });
+
+  it('keeps an empty period rather than dropping it, so bar n stays under label n', () => {
+    const out = combinedByPeriod(res([seg({ seconds: 600 })]), hours(8, 11), classes);
+    expect(Object.keys(out)).toEqual(hours(8, 11));
+    expect(out[hours(8, 9)[0]].cat_events).toEqual([]);
+  });
+
+  it('survives a day with no segments at all', () => {
+    const out = combinedByPeriod({ combined: [], combined_seconds: 0 }, hours(0, 24), classes);
+    expect(Object.keys(out)).toHaveLength(24);
+    expect(Object.values(out).every(p => p.cat_events.length === 0)).toBe(true);
+  });
+
+  it('no longer marks the barchart unavailable on the combined day', () => {
+    expect(COMBINED_UNAVAILABLE_TYPES.has('timeline_barchart')).toBe(false);
+    // The ones that stay unavailable do so for a reason the segments cannot fix.
+    expect(COMBINED_UNAVAILABLE_TYPES.has('top_titles')).toBe(true);
+    expect(COMBINED_UNAVAILABLE_TYPES.has('sunburst_clock')).toBe(true);
   });
 });

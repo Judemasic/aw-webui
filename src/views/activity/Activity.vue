@@ -118,9 +118,12 @@ div
         b-form-select(v-model="filter_category", :options="categoryStore.category_select(true)" size="sm")
 
 
-  // The strip of neighbouring days is drawn from active *history*, which is a
-  // per-host afk query. The combined day has no equivalent yet -- it would mean one
-  // combined request per day shown -- so it is hidden rather than drawn empty.
+  // The strip of neighbouring days is drawn from active *history*: the last 31 periods,
+  // not sub-periods of this one. 4.4g's slice cannot fill it -- the day's segments say
+  // nothing about the thirty days either side of it -- and asking for all 31 days in one
+  // combined request was measured on the phone at 13.3s and 4.2MB, against 0.4s and 0.2MB
+  // for the single day. That is the whole screen's load time spent on a navigation strip,
+  // so it stays hidden on the combined day.
   aw-periodusage(v-if="!isCombined" :periodusage_arr="periodusage", @update="setDate")
 
   // Time two devices were both awake for, that has not been answered yet, is counted

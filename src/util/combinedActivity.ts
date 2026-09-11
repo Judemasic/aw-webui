@@ -88,6 +88,25 @@ function topBy<T>(
 }
 
 /**
+ * A memoised label -> category-name lookup.
+ *
+ * A day is hundreds of segments over a handful of distinct apps, and `matchString`
+ * compiles regexes on every call, so the cache is what keeps slicing a day into 24 hours
+ * from recompiling the whole rule set 24 times over.
+ */
+function categoryMatcher(classes: Category[], pins?: CategoryPin[]): (label: string) => string[] {
+  const cache = new Map<string, string[]>();
+  return (label: string): string[] => {
+    const hit = cache.get(label);
+    if (hit) return hit;
+    const matched = matchString(label || '', classes, undefined, pins);
+    const name = matched ? matched.name : ['Uncategorized'];
+    cache.set(label, name);
+    return name;
+  };
+}
+
+/**
  * Build the Activity view's inputs from one day of combined segments.
  *
  * `ignored` segments are dropped throughout: an `ignore` decision means *"this time
@@ -102,17 +121,7 @@ export function combinedToActivity(
   const all = res.combined || [];
   const counted = all.filter(s => !s.ignored);
 
-  // Category lookup is memoised: a day is hundreds of segments over a handful of
-  // distinct apps, and matchString compiles regexes.
-  const catCache = new Map<string, string[]>();
-  const categoryOf = (label: string): string[] => {
-    const hit = catCache.get(label);
-    if (hit) return hit;
-    const matched = matchString(label || '', classes, undefined, pins);
-    const name = matched ? matched.name : ['Uncategorized'];
-    catCache.set(label, name);
-    return name;
-  };
+  const categoryOf = categoryMatcher(classes, pins);
 
   const app_events = topBy(
     counted,
@@ -151,6 +160,86 @@ export function combinedToActivity(
 }
 
 /**
+ * Category time per sub-period, sliced out of the segments the day already fetched
+ * (roadmap 4.4g).
+ *
+ * The Timeline barchart wants one bar per hour of a day (or per day of a week), each bar
+ * stacked by category. 4.4 assumed that meant one combined request per bar -- 24 runs of
+ * the whole contention pipeline for a single day -- and shelved the chart as too
+ * expensive. It is not: every segment already carries `start`, `end` and `seconds`, so
+ * the bars are a slice of a response that has already arrived, and this costs **no extra
+ * requests at all**.
+ *
+ * Two things it is careful about, both of which have gone wrong before here:
+ *
+ *  - **A segment that spans a boundary is split, not assigned.** A 20-minute stretch from
+ *    09:50 to 10:10 puts 10 minutes in each hour. Handing the whole thing to one side
+ *    moves time between bars and makes the chart disagree with the day's own total.
+ *  - **The split is proportional to the segment's own `seconds`**, not recomputed from
+ *    the timestamps. The server truncates a segment's duration once; re-deriving it from
+ *    `end - start` would reintroduce, per bar, the rounding that roadmap 4.5b removed.
+ *    Sliced this way a segment's pieces always add back up to exactly `seconds`.
+ *
+ * `periods` are `start/end` strings as `timeperiodToStr` writes them, so the boundaries
+ * are whatever the caller's period arithmetic produced -- which honours the owner's
+ * start-of-day, the correction 4.4d had to make. Periods with no activity are kept with
+ * an empty list rather than dropped, so bar *n* stays under label *n*.
+ *
+ * `ignored` segments are left out of every bar, for the reason
+ * {@link combinedToActivity} already gives: an ignored stretch counts as nothing, and the
+ * day's total excludes it.
+ */
+export function combinedByPeriod(
+  res: CombinedTimelineResponse,
+  periods: string[],
+  classes: Category[],
+  pins?: CategoryPin[]
+): Record<string, { cat_events: IEvent[] }> {
+  const categoryOf = categoryMatcher(classes, pins);
+  const bounds = periods.map(p => {
+    const [start, end] = p.split('/');
+    return { period: p, start: Date.parse(start), end: Date.parse(end) };
+  });
+
+  // One accumulator per period, keyed by the category's serialised name.
+  const totals = bounds.map(() => new Map<string, { name: string[]; seconds: number }>());
+
+  for (const s of res.combined || []) {
+    if (s.ignored) continue;
+    const segStart = Date.parse(s.start);
+    const segEnd = Date.parse(s.end);
+    const span = segEnd - segStart;
+    if (!(span > 0) || !(s.seconds > 0)) continue;
+    const name = categoryOf(s.label);
+    const id = JSON.stringify(name);
+
+    for (let i = 0; i < bounds.length; i++) {
+      const overlap = Math.min(segEnd, bounds[i].end) - Math.max(segStart, bounds[i].start);
+      if (overlap <= 0) continue;
+      const seconds = (overlap / span) * s.seconds;
+      const acc = totals[i];
+      const hit = acc.get(id);
+      if (hit) hit.seconds += seconds;
+      else acc.set(id, { name, seconds });
+    }
+  }
+
+  const out: Record<string, { cat_events: IEvent[] }> = {};
+  bounds.forEach((b, i) => {
+    out[b.period] = {
+      cat_events: Array.from(totals[i].values())
+        .sort((a, c) => c.seconds - a.seconds)
+        .map(t => ({
+          timestamp: new Date(b.start).toISOString(),
+          duration: t.seconds,
+          data: { $category: t.name },
+        })),
+    };
+  });
+  return out;
+}
+
+/**
  * The day's bounds for a `YYYY-MM-DD`, honouring the owner's start-of-day offset.
  *
  * Every screen in the app has to agree on where a day begins, or the same day shows two
@@ -179,9 +268,10 @@ export function dayBounds(date: string, startOfDay: string): { start: string; en
  *  - **Some visualizations read a host's raw buckets directly** (the sunburst clock, the
  *    chronological timeline), and the combined host owns no buckets.
  *
- * `timeline_barchart` is here for a third and softer reason: it needs category time
- * bucketed per sub-period, which means one combined request per period rather than one.
- * That is worth building; it is just not built.
+ * `timeline_barchart` used to be listed here for a third and softer reason -- it needs
+ * category time bucketed per sub-period, and that was assumed to mean one combined
+ * request per bar. It does not: {@link combinedByPeriod} slices the bars out of the
+ * segments the day already has, so the chart is drawn rather than hidden (roadmap 4.4g).
  *
  * Shared between the visualization's own availability flag and the view-tab filter, so a
  * tab whose every panel would say "(no data)" does not appear at all — three dead tabs is
@@ -199,7 +289,6 @@ export const COMBINED_UNAVAILABLE_TYPES = new Set([
   'top_stopwatches',
   'sunburst_clock',
   'vis_timeline',
-  'timeline_barchart',
 ]);
 
 /** Whether a view has anything at all to show on the combined day. */
