@@ -484,3 +484,13 @@ label.btn-outline-danger {
   background-color: #1a1d24 !important;
   border-color: #282c32 !important;
 }
+
+/* The sunburst's centre readout (roadmap 4.9b). It used to be bare text painted straight over
+   the arcs; it now has a backing panel, which means it needs a dark one here -- otherwise it
+   inherits dark text on a near-white card. */
+.aw-sunburst-categories .info {
+  background-color: rgba(26, 29, 36, 0.94) !important;
+  color: #e9ebf0 !important;
+  border-color: #282c32 !important;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6) !important;
+}

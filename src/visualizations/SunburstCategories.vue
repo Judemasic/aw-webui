@@ -6,23 +6,28 @@ sunburst.aw-sunburst-categories(:data="data", :colorScale="colorfunc", :getCateg
   // Add behaviors
   template(slot-scope="{ on, actions }")
     highlightOnHover(v-bind="{ on, actions }")
-    zoomOnClick(v-bind="{ on, actions }")
+    //- Deliberately not the library's `zoomOnClick`: it zooms on the very first tap, which on a
+    //- phone means you can never just *look* at a slice. See `onClickNode`.
+    tapBehavior(v-bind="{ on, actions }" :handler="onClickNode")
 
   // Add information to be displayed on top of the graph
   div(slot="top", slot-scope="{ nodes, actions }")
     //nodeInfoDisplayer(:current="nodes.mouseOver" :root="nodes.root" description="time spent" :show-all-number="false")
-    div.info
-      div(v-if="nodes.mouseOver !== null && nodes.mouseOver")
-        div.parent {{ nodes.mouseOver.data.parent ? nodes.mouseOver.data.parent.join(" > ") : " " }}
-        div.name {{ nodes.mouseOver.data.name }}
-        div {{ nodes.mouseOver.value | friendlyduration }}
-        div ({{ Math.round(100 * nodes.mouseOver.value / nodes.root.value) }}%)
-    //- The way back out. Tapping a slice zooms into it, and until this button existed there
-    //- was no way to undo that: on a phone there is no hover, no breadcrumb trail is
-    //- rendered, and the centre circle does not take a tap -- so the chart stayed zoomed
-    //- until the whole view was torn down by switching tabs and back.
-    div.zoomed-out(v-if="isZoomed(nodes)")
-      b-btn(size="sm" variant="outline-secondary" @click="zoomOut(nodes, actions)")
+    //- Rendered as a v-for over nought-or-one node so the node is resolved once, and so the
+    //- panel does not exist at all when nothing is picked -- an empty backing panel sitting in
+    //- the middle of the chart would look like a bug.
+    template(v-for="node in infoNodes(nodes)")
+      div.info(:key="node.id")
+        div.parent(v-if="node.data.parent && node.data.parent.length") {{ node.data.parent.join(" > ") }}
+        div.name {{ node.data.name }}
+        div.duration {{ node.value | friendlyduration }}
+        div.percent ({{ Math.round((100 * node.value) / nodes.root.value) }}%)
+    //- The way back out. Tapping a slice highlights it and tapping again zooms in, and until
+    //- this button existed there was no way to undo either: on a phone there is no hover, no
+    //- breadcrumb trail is rendered, and the centre circle does not take a tap -- so the chart
+    //- stayed zoomed until the whole view was torn down by switching tabs and back.
+    div.zoomed-out(v-if="canGoBack(nodes)")
+      b-btn(size="sm" variant="outline-secondary" @click="backToAll(nodes, actions)")
         | ↩ {{ $t('activity.sunburst.backToAll') }}
 
   // Add legend
@@ -42,6 +47,23 @@ import { getColorFromCategory } from '~/util/color';
 
 import { useCategoryStore } from '~/stores/categories';
 import { useSettingsStore } from '~/stores/settings';
+
+/**
+ * Renderless behavior that hands every arc tap to the parent instead of zooming straight away.
+ * Shaped like the library's own `zoomOnClick` so it drops into the same slot.
+ */
+const tapBehavior = {
+  name: 'tapBehavior',
+  props: {
+    on: { required: true, type: Function },
+    actions: { required: true, type: Object },
+    handler: { required: true, type: Function },
+  },
+  render: () => null,
+  created() {
+    this.on('clickNode', ({ node }) => this.handler(node, this.actions));
+  },
+};
 
 const example_data = {
   name: 'flare',
@@ -75,6 +97,7 @@ export default {
     highlightOnHover,
     nodeInfoDisplayer,
     sunburst,
+    tapBehavior,
     zoomOnClick,
   },
   props: {
@@ -83,13 +106,61 @@ export default {
       default: () => example_data,
     },
   },
+  data() {
+    return {
+      // The slice the last tap picked out, if that tap has not been followed by a second one.
+      // Held here rather than inside the behavior so the "back to all" button can see it: a
+      // highlight is something to undo even when nothing has been zoomed.
+      picked: null,
+    };
+  },
   methods: {
+    /**
+     * One tap picks a slice out; a second tap on the same slice zooms into it.
+     *
+     * The library zooms on the first tap, which is fine with a mouse -- the slice has already
+     * highlighted under the pointer before you decide to click. On a phone there is no hover,
+     * so the first touch is both the looking and the committing, and the chart jumps before
+     * anything has been read.
+     */
+    onClickNode(node, actions) {
+      if (this.picked === node) {
+        this.picked = null;
+        actions.zoomToNode(node);
+        // A zoom is a fresh view; carrying the dimming into it would leave everything the zoom
+        // just made room for greyed out.
+        actions.resetHighlight();
+      } else {
+        this.picked = node;
+        actions.highlightPath(node);
+      }
+    },
+    /** Whether there is anything to undo: a zoom, a highlight, or both. */
+    canGoBack(nodes): boolean {
+      return this.picked !== null || this.isZoomed(nodes);
+    },
     /** Whether a tap has zoomed the chart into some category below the root. */
     isZoomed(nodes): boolean {
       return !!(nodes && nodes.zoomed && nodes.root && nodes.zoomed !== nodes.root);
     },
-    zoomOut(nodes, actions) {
-      if (nodes && nodes.root && actions) actions.zoomToNode(nodes.root);
+    backToAll(nodes, actions) {
+      if (!actions) return;
+      // Both halves, because either can be the thing that wants undoing -- and the highlight
+      // used to survive this button, which made it look like the button had not worked.
+      this.picked = null;
+      actions.resetHighlight();
+      if (nodes && nodes.root && this.isZoomed(nodes)) actions.zoomToNode(nodes.root);
+    },
+    /**
+     * Nought or one node for the centre panel: whatever is under the pointer, else whatever the
+     * last tap picked out. The fallback is what makes the panel useful on a phone, where there
+     * is nothing "under the pointer" once the finger has gone.
+     */
+    infoNodes(nodes) {
+      if (!nodes || !nodes.root) return [];
+      const node = nodes.mouseOver || this.picked;
+      if (!node || !node.data) return [];
+      return [node];
     },
     categoryForColor: function (d) {
       const category = d.parent ? d.parent.concat([d.name]) : [d.name];
@@ -113,20 +184,28 @@ export default {
 .info {
   // Not a fixed 300px any more: on a phone the chart is narrower than the box was, so a
   // long category name ran off both sides of it.
-  width: 100%;
-  max-width: 300px;
-  height: 100px;
-  padding: 8px;
+  //
+  // It also has a backing panel now. It used to be bare text drawn straight over the arcs,
+  // which reads over the pale ones and disappears into the dark ones -- and it sits in the
+  // middle of the chart, so it was landing on a different colour every time.
+  width: max-content;
+  max-width: min(90%, 300px);
+  padding: 6px 10px;
   position: absolute;
   top: 50%;
   left: 50%;
-  z-level: 10;
+  z-index: 10;
   pointer-events: none;
   text-align: center;
-  transform: translate(-50%, -70%);
-  margin-left: 0;
-  margin-top: 0;
+  transform: translate(-50%, -50%);
   overflow: hidden;
+
+  background: rgba(255, 255, 255, 0.92);
+  color: #212529;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+  line-height: 1.3;
 
   .name {
     font-size: 1.25em;
@@ -136,6 +215,11 @@ export default {
 
   .parent {
     font-size: 0.8em;
+    opacity: 0.75;
+  }
+
+  .percent {
+    font-size: 0.85em;
     opacity: 0.75;
   }
 }
@@ -166,6 +250,14 @@ export default {
     stroke: rgba(0, 0, 0, 0.7);
     stroke-width: 2.75px;
     paint-order: stroke fill;
+
+    // Highlighting dims the *arcs* by setting `fill-opacity` on each group, and that value is
+    // inherited by the label inside it. `fill-opacity` fades a fill and leaves a stroke alone,
+    // so a dimmed label kept its full-strength black halo while the white letters faded out
+    // from under it -- the "weird dark bolded look". Pinning both here keeps every label at
+    // full strength and leaves the arcs alone to carry the dimming.
+    fill-opacity: 1;
+    stroke-opacity: 1;
   }
 
   svg .slice-4 text.node-info {
