@@ -31,6 +31,8 @@ import {
   COMBINED_HOST,
   combinedToActivity,
   dayBounds,
+  CombinedActivityResult,
+  CombinedSegment,
   CombinedTimelineResponse,
 } from '~/util/combinedActivity';
 
@@ -168,6 +170,15 @@ interface State {
     unresolved_count: number;
     unresolved_seconds: number;
     device_count: number;
+    /**
+     * The segments still waiting on a decision, and the devices they name.
+     *
+     * Kept (rather than only counted) since roadmap 4.4a, so Activity can open the
+     * resolution sheet on one of them instead of handing the owner to another screen
+     * and asking them to find the block again.
+     */
+    unresolved_segments: CombinedSegment[];
+    devices: { device: string; hostname?: string; is_own?: boolean }[];
   };
 
   stopwatch: {
@@ -245,6 +256,8 @@ export const useActivityStore = defineStore('activity', {
       unresolved_count: 0,
       unresolved_seconds: 0,
       device_count: 0,
+      unresolved_segments: [],
+      devices: [],
     },
 
     stopwatch: {
@@ -479,7 +492,11 @@ export const useActivityStore = defineStore('activity', {
       );
       const res = await getClient().req.get('/0/combined/timeline', { params: { start, end } });
       const categoryStore = useCategoryStore();
-      const built = combinedToActivity(res.data as CombinedTimelineResponse, categoryStore.classes);
+      const built = combinedToActivity(
+        res.data as CombinedTimelineResponse,
+        categoryStore.classes,
+        categoryStore.category_pins
+      );
 
       this.query_window_completed({
         app_events: built.app_events,
@@ -488,7 +505,7 @@ export const useActivityStore = defineStore('activity', {
         active_events: built.active_events,
         duration: built.duration,
       });
-      this.combined_completed(built);
+      this.combined_completed(built, res.data as CombinedTimelineResponse);
     },
 
     async query_multidevice_full(
@@ -888,6 +905,8 @@ export const useActivityStore = defineStore('activity', {
       this.combined.unresolved_count = 0;
       this.combined.unresolved_seconds = 0;
       this.combined.device_count = 0;
+      this.combined.unresolved_segments = [];
+      this.combined.devices = [];
 
       // Ensures that active history isn't being fully reloaded on every date change
       // (see caching done in query_active_history and query_active_history_android)
@@ -951,12 +970,19 @@ export const useActivityStore = defineStore('activity', {
 
     combined_completed(
       this: State,
-      built = { unresolved_count: 0, unresolved_seconds: 0, device_count: 0 }
+      built: Partial<CombinedActivityResult> = {},
+      raw?: CombinedTimelineResponse
     ) {
       this.combined.active = true;
-      this.combined.unresolved_count = built.unresolved_count;
-      this.combined.unresolved_seconds = built.unresolved_seconds;
-      this.combined.device_count = built.device_count;
+      this.combined.unresolved_count = built.unresolved_count || 0;
+      this.combined.unresolved_seconds = built.unresolved_seconds || 0;
+      this.combined.device_count = built.device_count || 0;
+      // The raw rows, not a summary: the resolution sheet needs each segment's
+      // competitors and each competitor's device, and nothing derived carries those.
+      this.combined.unresolved_segments = ((raw && raw.combined) || []).filter(
+        s => s.unresolved && !s.ignored
+      );
+      this.combined.devices = (raw && raw.devices) || [];
     },
   },
 });

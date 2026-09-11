@@ -394,6 +394,13 @@ import { getCategoryColorForLabel } from '~/util/color';
 import { ulid } from '~/util/ulid';
 import ProportionalTimeline from '~/visualizations/ProportionalTimeline.vue';
 import ResolutionSheet from '~/visualizations/ResolutionSheet.vue';
+import {
+  deviceLabel as deviceLabelFor,
+  deviceRole as deviceRoleFor,
+  ownDevice as ownDeviceOf,
+  participantsOf,
+  slicesOf as slicesOfSegment,
+} from '~/util/devices';
 
 interface Slice {
   device: string;
@@ -665,8 +672,7 @@ export default Vue.extend({
     },
     /** This device's uuid — a decision's `created_by`. Empty until the fetch lands. */
     ownDevice(): string {
-      const own = this.devices.find(d => d.is_own);
-      return own ? own.device : '';
+      return ownDeviceOf(this.devices);
     },
     /**
      * The competitors in the segment the sheet is open on.
@@ -678,27 +684,7 @@ export default Vue.extend({
      */
     resolveParticipants(): any[] {
       if (!this.resolving) return [];
-      const minutes = this.resolving.seconds / 60;
-      // Deduplicated on (device, label). A heartbeat-split event puts the same
-      // device/app into `background` twice, which in the detail list is harmless
-      // repetition but in the sheet would be two identical radio options — an
-      // unanswerable question — and would write the same app into
-      // `deliberate_background` twice.
-      const seen = new Set<string>();
-      const out: any[] = [];
-      for (const sl of this.slicesOf(this.resolving) as any[]) {
-        const k = `${sl.device}|${sl.label}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        out.push({
-          device: sl.device,
-          label: sl.label,
-          minutes,
-          color: this.colorFor(sl.label),
-          isForeground: sl.isForeground,
-        });
-      }
-      return out;
+      return participantsOf(this.resolving, (label: string) => this.colorFor(label));
     },
     devices(): DeviceTrack[] {
       return this.data ? (this.data.devices as DeviceTrack[]) : [];
@@ -1077,7 +1063,11 @@ export default Vue.extend({
       const key = label || '';
       const hit = this.colorCache.get(key);
       if (hit !== undefined) return hit;
-      const color = getCategoryColorForLabel(key, this.categoryStore.classes);
+      const color = getCategoryColorForLabel(
+        key,
+        this.categoryStore.classes,
+        this.categoryStore.category_pins
+      );
       this.colorCache.set(key, color);
       return color;
     },
@@ -1121,10 +1111,7 @@ export default Vue.extend({
       return also ? `${counted} You meant ${also} to be running too.` : counted;
     },
     slicesOf(s: Segment): any[] {
-      return [
-        { device: s.device, label: s.label, isForeground: true },
-        ...(s.background || []).map(b => ({ ...b, isForeground: false })),
-      ];
+      return slicesOfSegment(s);
     },
     sliceCount(s: Segment): string {
       const n = this.slicesOf(s).length;
@@ -1144,26 +1131,10 @@ export default Vue.extend({
      * which is the one thing R18 forbids. A hostname is the same string on every device.
      */
     deviceRole(uuid: string): string {
-      const d = this.devices.find(x => x.device === uuid);
-      return (d && d.hostname) || uuid;
+      return deviceRoleFor(uuid, this.devices);
     },
     deviceLabel(uuid: string): string {
-      const named = this.device_names && this.device_names[uuid];
-      if (named) return named;
-      const d = this.devices.find(x => x.device === uuid);
-      if (d && d.hostname) return d.hostname;
-      // Neither renamed nor carrying a hostname — events imported before 3.1's origin
-      // tagging land here. Returning the raw uuid was the 3.4 defect this view exists
-      // to fix, and a 36-character string is unreadable in a sheet whose whole
-      // question is *which device*. A short form is still unique in practice, and the
-      // rename control is one fold-out away when it is not.
-      if (d && d.is_own) return 'This device';
-      // Separators stripped first: a uuid's first four characters can include a dash,
-      // and "Device AAA-" reads like a truncation bug rather than a name.
-      return `Device ${uuid
-        .replace(/[^a-z0-9]/gi, '')
-        .slice(0, 4)
-        .toUpperCase()}`;
+      return deviceLabelFor(uuid, this.devices, this.device_names);
     },
     displayName(d: DeviceTrack): string {
       return this.deviceLabel(d.device);

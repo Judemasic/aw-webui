@@ -136,11 +136,29 @@ div
       div.mr-auto
         b {{ $t('activity.unresolvedTitle', { count: activityStore.combined.unresolved_count }) }}
         div.small {{ $t('activity.unresolvedHelp', { duration: unresolvedFriendly }) }}
-      b-btn.mt-2.mt-sm-0(:to="resolveLink" variant="warning" size="sm")
-        icon.mr-1(name="layer-group")
-        | {{ $t('activity.resolveNow') }}
+      div.mt-2.mt-sm-0
+        b-btn(variant="warning" size="sm" @click="resolveOpen = !resolveOpen")
+          icon.mr-1(name="layer-group")
+          | {{ resolveOpen ? $t('activity.resolveInline.hide') : $t('activity.resolveNow') }}
+        b-btn.ml-1(:to="resolveLink" variant="outline-warning" size="sm")
+          | {{ $t('activity.resolveInline.openTimeline') }}
+    b-collapse.mt-2(v-model="resolveOpen")
+      aw-inline-resolve(
+        :segments="activityStore.combined.unresolved_segments"
+        :devices="activityStore.combined.devices"
+        @resolved="refresh(true)"
+      )
 
   aw-uncategorized-notification(:periodLength="periodLength")
+
+  // Roadmap 4.4a -- the rule the owner wants is "this app, this category", and it used
+  // to mean leaving for Settings and finding the way back. The whole set is still edited
+  // there; this appends one app name to one category, where the app is on screen.
+  div.mt-2(v-if="uncategorizedApps.length > 0")
+    b-btn(variant="outline-secondary" size="sm" @click="categorizeOpen = !categorizeOpen")
+      | {{ categorizeOpen ? $t('activity.categorizeInline.hide') : $t('activity.categorizeInline.open', { count: uncategorizedApps.length }) }}
+    b-collapse.mt-2(v-model="categorizeOpen")
+      aw-inline-categorize(:events="activityStore.window.top_apps" @changed="refresh(true)")
 
   ul.row.nav.nav-tabs.mt-4
     li.nav-item(v-for="view in views")
@@ -252,12 +270,15 @@ import { useCategoryStore } from '~/stores/categories';
 import { useActivityStore, QueryOptions } from '~/stores/activity';
 import { useViewsStore } from '~/stores/views';
 import { COMBINED_HOST, viewHasCombinedContent } from '~/util/combinedActivity';
+import { matchString } from '~/util/classes';
 import 'vue-awesome/icons/layer-group';
 
 export default {
   name: 'Activity',
   components: {
     'aw-uncategorized-notification': () => import('~/components/UncategorizedNotification.vue'),
+    'aw-inline-resolve': () => import('~/components/InlineResolve.vue'),
+    'aw-inline-categorize': () => import('~/components/InlineCategorize.vue'),
   },
   props: {
     host: String,
@@ -283,6 +304,8 @@ export default {
 
       today: null,
       showOptions: false,
+      resolveOpen: false,
+      categorizeOpen: false,
 
       include_audible: true,
       // Include stopwatch events when a stopwatch bucket exists. The
@@ -323,6 +346,28 @@ export default {
      */
     resolveLink(): { path: string; query: Record<string, string> } {
       return { path: '/combined', query: { date: this._date, resolve: '1' } };
+    },
+    /**
+     * The day's apps that match no category rule.
+     *
+     * Computed here rather than inside the panel so the button that opens the panel can
+     * say how many there are -- and so the whole thing stays hidden on a day where
+     * everything is already categorised.
+     */
+    uncategorizedApps(): any[] {
+      const events = (this.activityStore.window && this.activityStore.window.top_apps) || [];
+      return events.filter((e: any) => {
+        const label = (e.data && (e.data.app || e.data.title)) || '';
+        return (
+          label &&
+          !matchString(
+            label,
+            this.categoryStore.classes,
+            undefined,
+            this.categoryStore.category_pins
+          )
+        );
+      });
     },
     ...mapState(useSettingsStore, ['devmode']),
     ...mapState(useSettingsStore, ['always_active_pattern']),
