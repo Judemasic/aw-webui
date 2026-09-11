@@ -21,7 +21,11 @@ sunburst.aw-sunburst-categories(:data="data", :colorScale="colorfunc", :getCateg
         div.parent(v-if="node.data.parent && node.data.parent.length") {{ node.data.parent.join(" > ") }}
         div.name {{ node.data.name }}
         div.duration {{ node.value | friendlyduration }}
-        div.percent ({{ Math.round((100 * node.value) / nodes.root.value) }}%)
+        //- Two shares, because they answer different questions: a category can be a small part
+        //- of the day and most of what it sits inside.
+        div.percent {{ $t('activity.sunburst.ofAll', { pct: share(node, nodes.root) }) }}
+        div.percent(v-if="hasParent(node, nodes)")
+          | {{ $t('activity.sunburst.ofParent', { pct: share(node, node.parent), name: node.parent.data.name }) }}
     //- The way back out. Tapping a slice highlights it and tapping again zooms in, and until
     //- this button existed there was no way to undo either: on a phone there is no hover, no
     //- breadcrumb trail is rendered, and the centre circle does not take a tap -- so the chart
@@ -145,11 +149,28 @@ export default {
     },
     backToAll(nodes, actions) {
       if (!actions) return;
-      // Both halves, because either can be the thing that wants undoing -- and the highlight
-      // used to survive this button, which made it look like the button had not worked.
+      // Every half, because any of them can be the thing that wants undoing -- and each has
+      // survived this button at some point, which made it look like the button had not worked.
       this.picked = null;
       actions.resetHighlight();
+      if (nodes) {
+        // The library keeps `mouseOver` set until the pointer leaves the chart, and on a
+        // touchscreen the pointer never leaves -- so the centre readout stayed up after the
+        // highlight behind it had gone. Clearing it here is the only way back to the default:
+        // the behaviours expose no action for it.
+        nodes.mouseOver = null;
+        nodes.clicked = null;
+      }
       if (nodes && nodes.root && this.isZoomed(nodes)) actions.zoomToNode(nodes.root);
+    },
+    /** Whether this node sits inside a real category rather than directly under the root. */
+    hasParent(node, nodes): boolean {
+      return !!(node && node.parent && nodes && node.parent !== nodes.root);
+    },
+    /** This node's share of some ancestor, as a whole-number percentage. */
+    share(node, of): number {
+      if (!of || !of.value) return 0;
+      return Math.round((100 * node.value) / of.value);
     },
     /**
      * Nought or one node for the centre panel: whatever is under the pointer, else whatever the
@@ -230,6 +251,13 @@ export default {
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
+
+  // An outline button is transparent, and this one sits over the widest ring of the chart,
+  // where the arc labels are -- so a label showed straight through the words on it. It gets
+  // its own opaque ground, like the centre readout.
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
 }
 </style>
 

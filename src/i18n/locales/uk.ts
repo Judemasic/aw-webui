@@ -329,6 +329,8 @@ export default {
     },
     sunburst: {
       backToAll: 'Назад до всіх',
+      ofAll: '{pct}% від усього',
+      ofParent: '{pct}% від {name}',
     },
     notCounted: {
       open: 'Не враховується категорій: {count}',

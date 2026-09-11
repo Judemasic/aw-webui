@@ -336,6 +336,8 @@ export default {
     },
     sunburst: {
       backToAll: 'Tillbaka till alla',
+      ofAll: '{pct}% av allt',
+      ofParent: '{pct}% av {name}',
     },
     notCounted: {
       open: 'Räknar inte {count} kategorier',

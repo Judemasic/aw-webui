@@ -321,6 +321,8 @@ export default {
     },
     sunburst: {
       backToAll: '返回全部',
+      ofAll: '占全部 {pct}%',
+      ofParent: '占 {name} {pct}%',
     },
     notCounted: {
       open: '有 {count} 个分类不计入',

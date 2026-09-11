@@ -332,6 +332,8 @@ export default {
     },
     sunburst: {
       backToAll: 'Back to all',
+      ofAll: '{pct}% of all',
+      ofParent: '{pct}% of {name}',
     },
     notCounted: {
       open: 'Not counting {count} categories',

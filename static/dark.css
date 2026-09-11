@@ -494,3 +494,10 @@ label.btn-outline-danger {
   border-color: #282c32 !important;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6) !important;
 }
+
+/* The sunburst's "back to all" button sits over the arcs and needs an opaque ground of its
+   own, same as the centre readout above. */
+.aw-sunburst-categories .zoomed-out {
+  background-color: rgba(26, 29, 36, 0.94) !important;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6) !important;
+}
