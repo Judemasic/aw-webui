@@ -1,6 +1,9 @@
 <template lang="pug">
 div
-  h2 Sync
+  //- Hidden when this is a panel inside Settings, which draws its own heading. The page and the
+  //- panel are the same component on purpose: two copies of a setup screen is two screens to keep
+  //- in step, and the one that fell behind would be the one somebody followed.
+  h2(v-if="!embedded") Sync
 
   p.text-muted.mb-4
     | Sync puts this computer's activity and your phones' activity in one place, so a day can
@@ -156,6 +159,10 @@ import { getClient } from '~/util/awclient';
 
 export default {
   name: 'Sync',
+  props: {
+    /** True when rendered as a Settings panel rather than as the /sync page. */
+    embedded: { type: Boolean, default: false },
+  },
   data() {
     return {
       status: null as any,

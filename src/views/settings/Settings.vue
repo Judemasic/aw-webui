@@ -19,7 +19,11 @@ div
         section.settings-section(v-show="activeGroup === group.id" :key="group.id")
           h4.settings-section__title {{ group.label }}
           p.text-muted.small.mb-3(v-if="group.help") {{ group.help }}
-          component(v-for="comp in group.components" :key="comp.name" :is="comp.name")
+          component(
+            v-for="comp in group.components"
+            :key="comp.name"
+            :is="comp.name"
+            v-bind="comp.props || {}")
 </template>
 
 <script lang="ts">
@@ -40,12 +44,13 @@ import ActivePatternSettings from '~/views/settings/ActivePatternSettings.vue';
 import PrivacyFilterSettings from '~/views/settings/PrivacyFilterSettings.vue';
 import AwNotifySettings from '~/views/settings/AwNotifySettings.vue';
 import DeviceSettings from './DeviceSettings.vue';
+import Sync from '~/views/Sync.vue';
 
 interface Group {
   id: string;
   label: string;
   help?: string;
-  components: { name: string }[];
+  components: { name: string; props?: Record<string, unknown> }[];
 }
 
 /**
@@ -75,6 +80,7 @@ export default {
     PrivacyFilterSettings,
     AwNotifySettings,
     DeviceSettings,
+    Sync,
   },
   beforeRouteLeave(to, from, next) {
     const categoryStore = useCategoryStore();
@@ -122,6 +128,15 @@ export default {
         help: this.$t('settings.groups.categorizationHelp'),
         components: [{ name: 'CategorizationSettings' }, { name: 'ActivePatternSettings' }],
       };
+      // Sync belongs here as well as at /sync. Somebody who has just installed the exe and
+      // wants their phone's categories goes to Settings and looks for it; a top-level nav item
+      // alone assumes they already know it exists.
+      const sync: Group = {
+        id: 'sync',
+        label: 'Sync',
+        help: "Share this computer's activity, categories and rules with your other devices.",
+        components: [{ name: 'Sync', props: { embedded: true } }],
+      };
       const privacy: Group = {
         id: 'privacy',
         label: this.$t('settings.groups.privacy'),
@@ -151,7 +166,17 @@ export default {
         components: [{ name: 'DeviceSettings' }],
       };
 
-      const groups = [general, appearance, categorization, notifications, privacy, developer];
+      // Not on Android: the app has its own sync screen, and its folder is chosen with a file
+      // picker rather than typed. Two sync screens on one device would be two owners.
+      const groups = [
+        general,
+        appearance,
+        categorization,
+        ...(this.$isAndroid ? [] : [sync]),
+        notifications,
+        privacy,
+        developer,
+      ];
       if (hasNativeBridge()) groups.splice(1, 0, device);
       return groups;
     },
