@@ -35,12 +35,18 @@ div
           | {{ status.enabled ? 'Turn sync off' : 'Turn sync on' }}
         b-btn.ml-2(
           variant="primary"
-          :disabled="busy || !status.can_sync"
+          :disabled="busy || syncing || !status.can_sync"
           @click="syncNow")
           b-spinner.mr-1(v-if="syncing" small)
-          | Sync now
+          | {{ syncing ? 'Syncing…' : 'Sync now' }}
 
-    div.mt-3(v-if="status.last_run")
+    div.mt-3(v-if="syncing")
+      b-alert.mb-0.py-2(show variant="info")
+        b-spinner.mr-2(small)
+        span.small
+          | Syncing. This can take a minute the first time, while every device's events are read.
+
+    div.mt-3(v-else-if="status.last_run")
       b-alert.mb-0.py-2(show :variant="status.last_run.ok ? 'success' : 'danger'")
         div
           b {{ status.last_run.ok ? 'Last sync succeeded' : 'Last sync failed' }}
@@ -169,7 +175,9 @@ export default {
       dirInput: '',
       error: null as string | null,
       busy: false,
+      /** Set from the server's own `running` flag, so a pass the timer started shows here too. */
       syncing: false,
+      pollTimer: null as any,
       peerFields: [
         { key: 'name', label: 'Device' },
         { key: 'last_modified', label: 'Last wrote' },
@@ -199,14 +207,18 @@ export default {
   mounted() {
     this.load();
   },
+  beforeDestroy() {
+    // A timer that outlives the page would keep requesting forever, on a page nobody is looking
+    // at -- and in the Settings panel this component is mounted and unmounted as groups change.
+    this.stopPolling();
+  },
   methods: {
     async load() {
       this.busy = true;
       this.error = null;
       try {
         const res = await getClient().req.get('/0/sync');
-        this.status = res.data;
-        this.dirInput = res.data.sync_dir;
+        this.apply(res.data);
       } catch (e: any) {
         this.error = this.messageOf(e, 'Could not read the sync settings.');
       } finally {
@@ -224,28 +236,64 @@ export default {
       this.error = null;
       try {
         const res = await getClient().req.post('/0/sync', body);
-        this.status = res.data;
-        this.dirInput = res.data.sync_dir;
+        this.apply(res.data);
       } catch (e: any) {
         this.error = this.messageOf(e, fallback);
       } finally {
         this.busy = false;
       }
     },
+    /**
+     * Start a sync and watch for it to finish.
+     *
+     * The request only *starts* the pass. Waiting for it was the first design and it deadlocked:
+     * aw-sync is a separate process that calls back into the same server, so a handler blocking
+     * until it finished was waiting on a request that could not be served until it returned. What
+     * that looked like from here was "timeout of 30000ms exceeded".
+     */
     async syncNow() {
-      this.syncing = true;
       this.busy = true;
       this.error = null;
       try {
-        // The response carries the whole status, so the device list updates in the same breath
-        // as the result -- a first sync is exactly the moment the folder changes.
         const res = await getClient().req.post('/0/sync/run');
-        this.status = res.data;
+        this.apply(res.data);
       } catch (e: any) {
-        this.error = this.messageOf(e, 'Could not run a sync.');
+        this.error = this.messageOf(e, 'Could not start a sync.');
       } finally {
-        this.syncing = false;
         this.busy = false;
+      }
+    },
+
+    /** Take a status response, and start or stop watching depending on what it says. */
+    apply(data: any) {
+      this.status = data;
+      // Not while the owner is mid-edit: a poll landing between two keystrokes would put the
+      // stored path back under their cursor.
+      if (!this.busy || this.dirInput === '') this.dirInput = data.sync_dir;
+      this.syncing = !!data.running;
+      if (data.running) this.startPolling();
+      else this.stopPolling();
+    },
+
+    startPolling() {
+      if (this.pollTimer) return;
+      // Two seconds: fast enough that the button stops saying "Syncing…" promptly, slow enough
+      // that a pass reading three devices' databases is not also answering a request every tick.
+      this.pollTimer = setInterval(async () => {
+        try {
+          const res = await getClient().req.get('/0/sync');
+          this.apply(res.data);
+        } catch {
+          // A failed poll is not worth a banner: the next one is two seconds away, and the pass
+          // it is watching is still running regardless of whether we could ask about it.
+        }
+      }, 2000);
+    },
+
+    stopPolling() {
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
       }
     },
     messageOf(e: any, fallback: string): string {
