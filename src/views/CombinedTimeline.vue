@@ -423,6 +423,11 @@ interface Segment {
   auto_resolved: boolean;
   /** True when the owner said they were away: it draws, but counts toward no total. */
   ignored: boolean;
+  /** Roadmap 4.6 — ignored because a category rule says this never counts, not because the
+   *  owner answered a question. Always arrives with `ignored`. */
+  not_counted?: boolean;
+  /** Roadmap 4.6 — the labels a rule took out of this block, so it can say what and why. */
+  excluded_labels?: string[];
   /** True when `label` is the owner's own words rather than an app name. */
   relabelled: boolean;
   deliberate_background: string[];
@@ -1082,6 +1087,7 @@ export default Vue.extend({
      */
     segmentBadge(s: Segment): { variant: string; text: string } {
       if (s.unresolved) return { variant: 'warning', text: 'Unresolved overlap' };
+      if (s.not_counted) return { variant: 'secondary', text: 'Not counted' };
       if (s.ignored) return { variant: 'secondary', text: 'Counts as nothing' };
       if (s.resolved_by)
         return {
@@ -1104,6 +1110,14 @@ export default Vue.extend({
     },
     /** One line naming what the decision did, for the detail panel. */
     resolvedSummary(s: Segment): string {
+      // A rule and an answer both stop time counting, and saying "you were away" about a rule
+      // would put words in the owner's mouth about a day they never looked at.
+      if (s.not_counted) {
+        const what = (s.excluded_labels || []).join(', ');
+        return what
+          ? `${what} is set not to count, so this time counts toward no total.`
+          : 'A category set not to count covers this, so it counts toward no total.';
+      }
       if (s.ignored) return 'You were away — this time counts toward no total.';
       if (s.relabelled) return `Relabelled “${s.label}”.`;
       const also = (s.deliberate_background || []).join(', ');

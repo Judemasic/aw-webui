@@ -66,6 +66,11 @@ export default {
   },
   settings: {
     title: '设置',
+    category: {
+      notCounted: '不统计此分类的时间',
+      notCountedHelp:
+        '匹配此分类的时间将不再计入：它会从所有统计中排除，并在合并时间线上以灰色显示。不会删除任何数据——取消勾选，时间即恢复。',
+    },
     unsavedCategoriesLeave: '分类有未保存的更改，确定要离开吗？',
     daystart: {
       startOfDay: '每日开始时间',

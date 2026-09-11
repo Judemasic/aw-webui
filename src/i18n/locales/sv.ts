@@ -66,6 +66,11 @@ export default {
   },
   settings: {
     title: 'Inställningar',
+    category: {
+      notCounted: 'Räkna inte tid i den här kategorin',
+      notCountedHelp:
+        'Tid som matchar den här kategorin slutar räknas: den utelämnas från alla summor överallt och ritas nedtonad i den kombinerade tidslinjen. Inget raderas -- bocka av så kommer tiden tillbaka.',
+    },
     unsavedCategoriesLeave:
       'Dina kategorier har osparade ändringar. Är du säker på att du vill lämna sidan?',
     daystart: {

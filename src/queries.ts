@@ -58,6 +58,15 @@ interface BaseQueryParams {
   include_audible?: boolean;
   categories: Category[];
   filter_categories: string[][];
+  /**
+   * Categories the owner has said never count (roadmap 4.6), as full name paths.
+   *
+   * Applied right after categorisation and before anything is summed, so an excluded app is
+   * missing from the day's total, its app list, its category breakdown and its active time --
+   * "do not count this" has to mean the same thing in every number on the page, not just the
+   * one the owner happened to be looking at.
+   */
+  not_counted_categories?: string[][];
   bid_browsers?: string[];
   bid_stopwatch?: string;
   return_variable_suffix?: string;
@@ -212,6 +221,13 @@ export function canonicalEvents(params: DesktopQueryParams | AndroidQueryParams)
     params.filter_categories
       ? `events = filter_keyvals(events, "$category", ${cat_filter_str});`
       : '',
+    // Roadmap 4.6 -- time the owner said never counts. Server-side and before every sum, for
+    // the reason above; the combined day has the same exclusion applied inside the pipeline.
+    params.not_counted_categories && params.not_counted_categories.length > 0
+      ? `events = exclude_keyvals(events, "$category", ${JSON.stringify(
+          params.not_counted_categories
+        )});`
+      : '',
     // "Return" events by setting variable named with return_variable if set
     params.return_variable_suffix
       ? `events_${params.return_variable_suffix} = events;
@@ -248,13 +264,15 @@ export function appQuery(
   appbucket: string,
   categories: Category[],
   filter_categories: string[][],
-  isIos = false
+  isIos = false,
+  not_counted_categories?: string[][]
 ): string[] {
   appbucket = escape_doublequote(appbucket);
   const params: AndroidQueryParams = {
     bid_android: appbucket,
     categories,
     filter_categories,
+    not_counted_categories,
     isIos,
   };
 

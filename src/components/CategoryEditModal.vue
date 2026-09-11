@@ -37,6 +37,13 @@ b-modal(id="edit" ref="edit" title="Edit category" @show="resetModal" @hidden="h
 
   hr
   div.my-1
+    b Counting
+    b-form-checkbox(v-model="editing.not_counted" switch)
+      | {{ $t('settings.category.notCounted') }}
+    small.text-muted {{ $t('settings.category.notCountedHelp') }}
+
+  hr
+  div.my-1
     b Color
 
     b-form-checkbox(v-model="editing.inherit_color" switch)
@@ -214,6 +221,10 @@ export default {
         data: {
           color: this.editing.inherit_color === true ? undefined : this.editing.color,
           score: this.editing.inherit_score === true ? undefined : this.editing.score,
+          // Roadmap 4.6. Written only when true, so a category that has never been excluded
+          // carries no key at all -- `classes` is a synced setting, and a false written into
+          // every category would be a diff on every device for nothing.
+          not_counted: this.editing.not_counted === true ? true : undefined,
         },
       };
       this.categoryStore.updateClass(new_class);
@@ -241,6 +252,7 @@ export default {
         score,
         inherit_score,
         match_fields: storedKeys ? [...storedKeys] : [],
+        not_counted: !!(cat.data && cat.data.not_counted),
       };
     },
   },

@@ -66,6 +66,11 @@ export default {
   },
   settings: {
     title: 'Einstellungen',
+    category: {
+      notCounted: 'Zeit in dieser Kategorie nicht zählen',
+      notCountedHelp:
+        'Zeit, die auf diese Kategorie passt, zählt nicht mehr: sie fehlt überall in allen Summen und wird in der kombinierten Zeitleiste ausgegraut dargestellt. Nichts wird gelöscht -- Haken entfernen und die Zeit ist zurück.',
+    },
     unsavedCategoriesLeave: 'Ihre Kategorien haben ungespeicherte Änderungen. Wirklich verlassen?',
     daystart: {
       startOfDay: 'Tagesbeginn',

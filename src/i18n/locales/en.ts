@@ -66,6 +66,11 @@ export default {
   },
   settings: {
     title: 'Settings',
+    category: {
+      notCounted: 'Do not count time in this category',
+      notCountedHelp:
+        'Time this category matches stops counting: it is left out of every total, everywhere, and drawn greyed out on the combined timeline. Nothing is deleted -- untick this and the time comes back.',
+    },
     unsavedCategoriesLeave: 'Your categories have unsaved changes, are you sure you want to leave?',
     daystart: {
       startOfDay: 'Start of day',

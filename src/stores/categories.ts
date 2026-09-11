@@ -8,6 +8,7 @@ import {
   createMissingParents,
   mergeCategorySets,
   annotate,
+  notCountedCategories,
   pinsForQuery,
   pinStatus,
   Category,
@@ -117,6 +118,11 @@ export const useCategoryStore = defineStore('categories', {
       // the server-side classifier reaches the same answer the webui does rather than
       // the two disagreeing about the same day (4.4d's lesson).
       return rules.concat(pinsForQuery(this.category_pins, this.classes));
+    },
+
+    /** The categories the owner has said never count (roadmap 4.6) -- see `notCountedCategories`. */
+    not_counted_categories(): string[][] {
+      return notCountedCategories(this.classes);
     },
 
     /** Pins with what they are currently doing, for the pinned list in settings. */

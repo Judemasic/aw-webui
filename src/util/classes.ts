@@ -389,6 +389,35 @@ function pickDeepest(categories: Category[]) {
 // question.
 
 /** The owner's answer to one collision: this exact activity label is this category. */
+/**
+ * The categories the owner has said never count (roadmap 4.6), as full name paths.
+ *
+ * A category opts in with `data.not_counted`. Everything filed **under** it is excluded too: a
+ * child's time is part of its parent's time in every total the app shows, so excluding the parent
+ * and then still counting the child would make the parts and the whole disagree.
+ *
+ * That is deliberately the opposite of how a category *rule* works, where a child is never matched
+ * by its parent's pattern. The pattern says what a category catches; this says what a total leaves
+ * out, and those are two different questions.
+ */
+export function notCountedCategories(classes: Category[]): string[][] {
+  const out: string[][] = [];
+  const add = (name: string[]) => {
+    if (!out.some(n => _.isEqual(n, name))) out.push(name);
+  };
+  for (const cat of classes || []) {
+    if (!(cat.data && cat.data.not_counted === true)) continue;
+    add(cat.name);
+    for (const other of classes) {
+      const isChild =
+        other.name.length > cat.name.length &&
+        _.isEqual(cat.name, other.name.slice(0, cat.name.length));
+      if (isChild) add(other.name);
+    }
+  }
+  return out;
+}
+
 export interface CategoryPin {
   /** The activity label the question was about, matched exactly. */
   label: string;

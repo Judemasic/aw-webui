@@ -47,3 +47,33 @@ test('generate fullDesktopQuery', () => {
   expect(query).toMatchSnapshot();
   expectBracketsClosed(query);
 });
+
+describe('not-counted categories (roadmap 4.6)', () => {
+  const excluded = [['Excluded'], ['Excluded', 'Launcher']];
+
+  it('excludes them after categorising and before anything is summed', () => {
+    const q = queries
+      .fullDesktopQuery({ ...queryParams, not_counted_categories: excluded })
+      .join('\n');
+    const categorize = q.indexOf('categorize(');
+    const exclude = q.indexOf('exclude_keyvals(events, "$category"');
+    const sum = q.indexOf('sum_durations(');
+    expect(categorize).toBeGreaterThan(-1);
+    expect(exclude).toBeGreaterThan(categorize);
+    expect(sum).toBeGreaterThan(exclude);
+    expect(q).toContain(JSON.stringify(excluded));
+  });
+
+  it('adds nothing at all when nothing is excluded', () => {
+    const q = queries.fullDesktopQuery(queryParams).join('\n');
+    expect(q).not.toContain('exclude_keyvals');
+    expect(
+      queries.fullDesktopQuery({ ...queryParams, not_counted_categories: [] }).join('\n')
+    ).not.toContain('exclude_keyvals');
+  });
+
+  it('excludes on Android too, where the day has no afk bucket to hide behind', () => {
+    const q = queries.appQuery('aw-watcher-android_test', [], [], false, excluded).join('\n');
+    expect(q).toContain('exclude_keyvals(events, "$category"');
+  });
+});

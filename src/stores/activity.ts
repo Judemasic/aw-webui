@@ -457,7 +457,8 @@ export const useActivityStore = defineStore('activity', {
         selectedBucket,
         categoryStore.classes_for_query,
         filter_categories,
-        isIos
+        isIos,
+        categoryStore.not_counted_categories
       );
       const data = await getClient().query(periods, q).catch(this.errorHandler);
 
@@ -565,6 +566,7 @@ export const useActivityStore = defineStore('activity', {
         filter_afk,
         categories,
         filter_categories,
+        not_counted_categories: useCategoryStore().not_counted_categories,
         host_params: {},
         always_active_pattern,
       });
@@ -594,6 +596,7 @@ export const useActivityStore = defineStore('activity', {
         filter_afk,
         categories,
         filter_categories,
+        not_counted_categories: useCategoryStore().not_counted_categories,
         include_audible,
         always_active_pattern,
       });
@@ -717,6 +720,7 @@ export const useActivityStore = defineStore('activity', {
               : undefined,
           categories,
           filter_categories,
+          not_counted_categories: useCategoryStore().not_counted_categories,
           filter_afk,
           always_active_pattern,
           ...(isAndroid

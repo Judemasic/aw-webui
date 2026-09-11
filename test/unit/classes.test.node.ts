@@ -100,3 +100,46 @@ test('normalizeSelectKeys rejects empty lists', () => {
   expect(classes.normalizeSelectKeys(null)).toBeUndefined();
   expect(classes.normalizeSelectKeys(['app', 'title'])).toEqual(['app', 'title']);
 });
+
+describe('notCountedCategories (roadmap 4.6)', () => {
+  const notCountedCategories = classes.notCountedCategories;
+  const cat = (name: string[], not_counted?: boolean) => ({
+    name,
+    rule: { type: 'regex' as const, regex: name[name.length - 1] },
+    data: not_counted ? { not_counted: true } : {},
+  });
+
+  it('returns nothing when no category is excluded', () => {
+    expect(notCountedCategories([cat(['Work']), cat(['Media'])])).toEqual([]);
+  });
+
+  it('returns the excluded category', () => {
+    expect(notCountedCategories([cat(['Work']), cat(['System'], true)])).toEqual([['System']]);
+  });
+
+  it('excludes everything filed under an excluded category', () => {
+    // The parent's total includes the child's time, so counting the child while excluding the
+    // parent would make the parts disagree with the whole.
+    const tree = [
+      cat(['System'], true),
+      cat(['System', 'Launcher']),
+      cat(['System', 'Launcher', 'One UI Home']),
+      cat(['Work']),
+      cat(['Work', 'Programming']),
+    ];
+    expect(notCountedCategories(tree)).toEqual([
+      ['System'],
+      ['System', 'Launcher'],
+      ['System', 'Launcher', 'One UI Home'],
+    ]);
+  });
+
+  it('does not treat a name that merely starts the same as a child', () => {
+    expect(notCountedCategories([cat(['System'], true), cat(['Systems'])])).toEqual([['System']]);
+  });
+
+  it('lists a category once however many excluded ancestors it has', () => {
+    const tree = [cat(['A'], true), cat(['A', 'B'], true), cat(['A', 'B', 'C'])];
+    expect(notCountedCategories(tree)).toEqual([['A'], ['A', 'B'], ['A', 'B', 'C']]);
+  });
+});
