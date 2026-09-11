@@ -167,10 +167,16 @@ export function canonicalEvents(params: DesktopQueryParams | AndroidQueryParams)
     // "title" here collapses all Android watcher events to zero duration
     // (regression introduced in bf0fc84 to support iOS ScreenTime, which DOES
     // carry "title").  Only add "title" when the bucket is an iOS ScreenTime import.
+    //
+    // "classname" is merged on as well (roadmap 4.4h) because merging by "app" alone
+    // collapses a day to one row per app -- and every later step, including the
+    // ["app", "classname"] merge that fills title_events, then has only that one
+    // classname to work from. Measured on the phone: 41 rows after an "app"-only merge,
+    // 67 with "classname", which is the sixteen apps that have more than one screen.
     isAndroidParams(params)
       ? params.isIos
         ? 'events = merge_events_by_keys(events, ["app", "title"]);'
-        : 'events = merge_events_by_keys(events, ["app"]);'
+        : 'events = merge_events_by_keys(events, ["app", "classname"]);'
       : '',
     // Fetch not-afk events
     isDesktopParams(params)

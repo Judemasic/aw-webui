@@ -60,6 +60,9 @@ export const androidViews: View[] = [
     name: 'Summary',
     elements: [
       { type: 'top_apps', size: 3 },
+      // The screen inside an app, which is the only per-screen detail Android has
+      // (roadmap 4.4h). Not 'top_titles': on Android a title *is* the app name.
+      { type: 'top_bundle_ids', size: 3 },
       { type: 'top_categories', size: 3 },
       { type: 'timeline_barchart', size: 3 },
       { type: 'category_tree', size: 3 },

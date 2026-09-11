@@ -33,9 +33,12 @@ div(v-if="editable || !activityStore.buckets.loaded || has_prerequisites || !set
                  :namefunc="e => e.data.title",
                  :colorfunc="e => e.data['$category']",
                  with_limit)
-    div(v-if="type == 'top_bundle_ids' && activityStore.ios.available")
+    // The same rows answer two questions: an iOS bundle id, and -- since 4.4h -- the
+    // Android Activity class, which is the only per-screen detail Android has.
+    div(v-if="type == 'top_bundle_ids' && (activityStore.ios.available || activityStore.android.available)")
       aw-summary(:fields="activityStore.window.top_titles",
-                 :namefunc="e => e.data.classname",
+                 :namefunc="top_screen_namefunc",
+                 :hoverfunc="top_screen_hoverfunc",
                  :colorfunc="e => e.data.app",
                  with_limit)
     div(v-if="type == 'top_domains'")
@@ -123,6 +126,7 @@ import 'vue-awesome/icons/times';
 import 'vue-awesome/icons/bars';
 
 import { buildBarchartDataset } from '~/util/datasets';
+import { prettyScreenName } from '~/util/screenNames';
 import { COMBINED_UNAVAILABLE_TYPES } from '~/util/combinedActivity';
 
 // TODO: Move this somewhere else
@@ -178,6 +182,13 @@ export default {
         'top_stopwatches',
         'top_bucket_data',
       ],
+      // An iOS bundle id is already readable and is what the owner would search for;
+      // an Android class path is not, and is cleaned. The raw value stays on the hover.
+      top_screen_namefunc: e =>
+        this.activityStore.ios.available
+          ? e.data.classname
+          : prettyScreenName(e.data.classname, e.data.app),
+      top_screen_hoverfunc: e => [e.data.app, e.data.classname].filter(Boolean).join('\n'),
       // TODO: Move this function somewhere else
       top_editor_files_namefunc: e => {
         let f = e.data.file || '';
@@ -211,8 +222,11 @@ export default {
           available: this.activityStore.window.available && this.combinedAllows('top_titles'),
         },
         top_bundle_ids: {
-          title: 'Bundle IDs',
-          available: this.activityStore.ios.available,
+          // Named for what it is on the platform being looked at. On Android it is the
+          // Activity class -- the screen inside an app -- and calling that a "bundle id"
+          // or a "window title" would both be wrong.
+          title: this.activityStore.ios.available ? 'Bundle IDs' : 'Top Screens',
+          available: this.activityStore.ios.available || this.activityStore.android.available,
         },
         top_domains: {
           title: 'Top Browser Domains',
