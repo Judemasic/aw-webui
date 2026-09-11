@@ -440,7 +440,7 @@ import moment from 'moment';
 import { mapState } from 'pinia';
 import { useSettingsStore } from '~/stores/settings';
 import { useCategoryStore } from '~/stores/categories';
-import { get_day_start_with_offset } from '~/util/time';
+import { get_day_start_with_offset, get_today_with_offset } from '~/util/time';
 import { getClient } from '~/util/awclient';
 import { getCategoryColorForLabel } from '~/util/color';
 import { screenRowName } from '~/util/screenNames';
@@ -533,7 +533,17 @@ export default Vue.extend({
   },
   data() {
     return {
-      date: moment().format('YYYY-MM-DD'),
+      // `get_today_with_offset`, never `moment()`: with a `Start of day` of 04:00, the
+      // calendar date between midnight and 04:00 names a day that has not begun. This view
+      // then asked for 04:00 *tomorrow* to 04:00 the day after -- a window entirely in the
+      // future -- and drew an empty timeline every night, for four hours, with nothing on
+      // screen to say why. The offset-aware "today" is the previous date until 04:00, which
+      // is what every other screen already means by today.
+      //
+      // Called with no argument here because `data()` runs before the settings store has
+      // loaded; it falls back to the stored offset, and `startOfDayLoaded` corrects it if
+      // the owner's differs.
+      date: get_today_with_offset(),
       data: null as any,
       error: null as string | null,
       mode: 'last_duration',
@@ -649,7 +659,9 @@ export default Vue.extend({
       return moment(get_day_start_with_offset(moment(this.date), this.startOfDay));
     },
     isToday(): boolean {
-      return this.date >= moment().format('YYYY-MM-DD');
+      // Same offset, or the "next day" arrow would be enabled on the real today and would walk
+      // the owner into the empty future window this view used to open on.
+      return this.date >= get_today_with_offset(this.startOfDay);
     },
     dateLabel(): string {
       return this.isToday ? 'TODAY' : this.dayStart.format('ddd D MMM').toUpperCase();
@@ -938,6 +950,13 @@ export default Vue.extend({
   },
   watch: {
     date: 'reload',
+    // `data()` seeds `date` from the stored offset because the settings store has not loaded
+    // yet. When it does, and the owner's offset puts us on a different day, move -- otherwise
+    // the view opens on tomorrow until something else makes it reload.
+    startOfDay(offset: string) {
+      const today = get_today_with_offset(offset);
+      if (this.date > today) this.date = today;
+    },
     // Editing a category in Settings must repaint the day, not leave it on the colours
     // the categories used to have.
     'categoryStore.classes': {
@@ -1138,7 +1157,7 @@ export default Vue.extend({
       this.date = this.dayStart.clone().add(n, 'day').format('YYYY-MM-DD');
     },
     goToday() {
-      this.date = moment().format('YYYY-MM-DD');
+      this.date = get_today_with_offset(this.startOfDay);
     },
     onDeviceToggle() {
       this.clearSelection();
