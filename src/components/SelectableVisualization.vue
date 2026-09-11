@@ -35,7 +35,7 @@ div(v-if="editable || !activityStore.buckets.loaded || has_prerequisites || !set
                  with_limit)
     // The same rows answer two questions: an iOS bundle id, and -- since 4.4h -- the
     // Android Activity class, which is the only per-screen detail Android has.
-    div(v-if="type == 'top_bundle_ids' && (activityStore.ios.available || activityStore.android.available)")
+    div(v-if="type == 'top_bundle_ids' && hasScreens")
       aw-summary(:fields="activityStore.window.top_titles",
                  :namefunc="top_screen_namefunc",
                  :hoverfunc="top_screen_hoverfunc",
@@ -226,7 +226,7 @@ export default {
           // Activity class -- the screen inside an app -- and calling that a "bundle id"
           // or a "window title" would both be wrong.
           title: this.activityStore.ios.available ? 'Bundle IDs' : 'Top Screens',
-          available: this.activityStore.ios.available || this.activityStore.android.available,
+          available: this.hasScreens,
         },
         top_domains: {
           title: 'Top Browser Domains',
@@ -327,6 +327,18 @@ export default {
      * The list of which ones lives beside the adapter that builds the combined day, so
      * the panel's availability flag and the view-tab filter cannot drift apart.
      */
+    /**
+     * Whether there are per-screen rows to show at all.
+     *
+     * Per device, that is a question about the platform: iOS reports a bundle id, Android an
+     * Activity class, a desktop neither. On the combined day it is a question about the *day* --
+     * the rows arrive only where the device that won a block reported one (roadmap 4.4i) -- so a
+     * combined day of desktop activity has no panel rather than an empty one.
+     */
+    hasScreens() {
+      if (this.activityStore.combined.active) return this.activityStore.combined.has_screens;
+      return this.activityStore.ios.available || this.activityStore.android.available;
+    },
     combinedAllows() {
       return (type: string): boolean =>
         !this.activityStore.combined.active || !COMBINED_UNAVAILABLE_TYPES.has(type);

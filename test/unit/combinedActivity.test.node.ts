@@ -231,3 +231,66 @@ describe('combinedByPeriod', () => {
     expect(COMBINED_UNAVAILABLE_TYPES.has('sunburst_clock')).toBe(true);
   });
 });
+
+describe('per-screen rows on the combined day (roadmap 4.4i)', () => {
+  const withScreen = (o: any) =>
+    seg({ detail: { app: o.label || 'vim', classname: o.classname }, ...o });
+
+  it('splits one app into the screens inside it', () => {
+    const out = combinedToActivity(
+      res([
+        withScreen({
+          label: 'WhatsApp',
+          classname: 'com.whatsapp.home.ui.HomeActivity',
+          seconds: 600,
+        }),
+        withScreen({
+          label: 'WhatsApp',
+          classname: 'com.whatsapp.calling.ui.VoipActivityV2',
+          seconds: 1080,
+        }),
+        withScreen({
+          label: 'WhatsApp',
+          classname: 'com.whatsapp.home.ui.HomeActivity',
+          seconds: 300,
+        }),
+      ]),
+      classes
+    );
+    expect(out.title_events.map(e => [e.data.app, e.data.classname, e.duration])).toEqual([
+      ['WhatsApp', 'com.whatsapp.calling.ui.VoipActivityV2', 1080],
+      ['WhatsApp', 'com.whatsapp.home.ui.HomeActivity', 900],
+    ]);
+    // The app total is unchanged: screens are a breakdown of it, not extra time.
+    expect(out.app_events.map(e => e.duration)).toEqual([1980]);
+  });
+
+  it('has no rows at all for a day whose devices report no screen', () => {
+    // A desktop-only combined day. No panel is the right answer; an empty one would read as
+    // "you opened no screens", which is a claim about the day rather than about the data.
+    const out = combinedToActivity(res([seg({ seconds: 600 })]), classes);
+    expect(out.title_events).toEqual([]);
+  });
+
+  it('leaves ignored time out of the screens too', () => {
+    const out = combinedToActivity(
+      res([
+        withScreen({
+          label: 'WhatsApp',
+          classname: 'com.whatsapp.Conversation',
+          seconds: 600,
+          ignored: true,
+        }),
+        withScreen({ label: 'WhatsApp', classname: 'com.whatsapp.Conversation', seconds: 60 }),
+      ]),
+      classes
+    );
+    expect(out.title_events.map(e => e.duration)).toEqual([60]);
+  });
+
+  it('no longer marks the screens panel unavailable on the combined day', () => {
+    expect(COMBINED_UNAVAILABLE_TYPES.has('top_bundle_ids')).toBe(false);
+    // Titles stay unavailable: on Android a title is the app name by construction (4.4f).
+    expect(COMBINED_UNAVAILABLE_TYPES.has('top_titles')).toBe(true);
+  });
+});

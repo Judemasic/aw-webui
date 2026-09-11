@@ -212,6 +212,8 @@ interface State {
      */
     unresolved_segments: CombinedSegment[];
     devices: { device: string; hostname?: string; is_own?: boolean }[];
+    /** Roadmap 4.4i — true when some device reported the screen inside its app. */
+    has_screens: boolean;
   };
 
   stopwatch: {
@@ -291,6 +293,7 @@ export const useActivityStore = defineStore('activity', {
       device_count: 0,
       unresolved_segments: [],
       devices: [],
+      has_screens: false,
     },
 
     stopwatch: {
@@ -535,7 +538,9 @@ export const useActivityStore = defineStore('activity', {
 
       this.query_window_completed({
         app_events: built.app_events,
-        title_events: [],
+        // Per-screen rows where a device recorded them (roadmap 4.4i). Empty on a day of
+        // desktop-only activity, which is what an absent panel should mean.
+        title_events: built.title_events,
         cat_events: built.cat_events,
         active_events: built.active_events,
         duration: built.duration,
@@ -1011,6 +1016,9 @@ export const useActivityStore = defineStore('activity', {
         s => s.unresolved && !s.ignored
       );
       this.combined.devices = (raw && raw.devices) || [];
+      // Whether this day has any per-screen detail at all, which is what decides if the Top
+      // Screens panel has anything to say. A combined day of desktop activity has none.
+      this.combined.has_screens = (built.title_events || []).length > 0;
     },
   },
 });

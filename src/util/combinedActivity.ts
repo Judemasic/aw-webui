@@ -39,6 +39,12 @@ export interface CombinedSegment {
   seconds: number;
   label: string;
   device: string;
+  /**
+   * The winning activity's own fields, beyond its name (roadmap 4.4i). On Android this carries
+   * `classname` -- the screen inside the app. Exact per block: ⑥ coalesce only glues blocks whose
+   * winning `data` is identical, so a block never spans two screens.
+   */
+  detail?: Record<string, any>;
   unresolved?: boolean;
   ignored?: boolean;
   /** The other activities that were running in this window (the losers of the pick). */
@@ -53,6 +59,11 @@ export interface CombinedTimelineResponse {
 
 export interface CombinedActivityResult {
   app_events: IEvent[];
+  /**
+   * Per-screen rows, `(app, classname)`, for the Top Screens panel -- the same shape a per-device
+   * Android query's `title_events` has, so the panel needs no combined-specific branch.
+   */
+  title_events: IEvent[];
   cat_events: IEvent[];
   active_events: IEvent[];
   duration: number;
@@ -129,6 +140,16 @@ export function combinedToActivity(
     (app, seconds) => ({ app, $duration: seconds })
   );
 
+  // The screen inside the app, where the winning device recorded one. Desktop events have no
+  // `classname`, so a day of desktop activity simply produces no rows here rather than a panel
+  // full of blanks -- which is the difference between "this device does not report screens" and
+  // "you used no screens".
+  const title_events = topBy(
+    counted.filter(s => s.detail && s.detail.classname),
+    s => [s.label || 'unknown', String((s.detail || {}).classname)] as [string, string],
+    ([app, classname], seconds) => ({ app, classname, $duration: seconds })
+  );
+
   const cat_events = topBy(
     counted,
     s => categoryOf(s.label),
@@ -148,6 +169,7 @@ export function combinedToActivity(
 
   return {
     app_events,
+    title_events,
     cat_events,
     active_events,
     // The server's own figure, not a re-sum of the rows: it is truncated once rather
@@ -262,9 +284,16 @@ export function dayBounds(date: string, startOfDay: string): { start: string; en
  *
  * Two different reasons, both permanent-ish rather than unimplemented:
  *
- *  - **A combined segment's label is the app name alone.** The pipeline decides which
- *    *device* counted for a stretch of time, not which window, so titles, browser
- *    domains/URLs and editor files have no combined answer at all.
+ *  - **A combined segment names one device's activity.** The pipeline decides which *device*
+ *    counted for a stretch of time, not which window, so browser domains/URLs and editor files
+ *    have no combined answer at all -- they live in buckets the combined track never reads.
+ *
+ *    `top_bundle_ids` used to be here too, on the grounds that a segment "carries an app label
+ *    and nothing finer". That stopped being true in 4.4i: the response now carries the winning
+ *    activity's own fields, so Android's `classname` -- the screen inside the app -- reaches the
+ *    combined day exactly, one screen per block. `top_titles` stays listed because on Android a
+ *    title *is* the app name (4.4f) and a desktop's real titles would make a panel that is
+ *    populated on some days and empty on others for reasons the owner cannot see.
  *  - **Some visualizations read a host's raw buckets directly** (the sunburst clock, the
  *    chronological timeline), and the combined host owns no buckets.
  *
@@ -279,7 +308,6 @@ export function dayBounds(date: string, startOfDay: string): { start: string; en
  */
 export const COMBINED_UNAVAILABLE_TYPES = new Set([
   'top_titles',
-  'top_bundle_ids',
   'top_domains',
   'top_urls',
   'top_browser_titles',
