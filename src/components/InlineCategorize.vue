@@ -17,14 +17,13 @@ div
         div {{ r.label }}
         div.small.text-muted {{ duration(r.seconds) }}
       div.d-flex.align-items-center(style="gap: 0.35rem")
-        b-form-select(
+        b-btn(
           size="sm"
-          style="max-width: 200px"
-          :value="null"
-          :options="categoryOptions"
-          @change="assign(r.label, $event)"
+          variant="outline-secondary"
           :disabled="busy"
+          @click="openPicker(r.label)"
         )
+          | {{ $t('activity.categorizeInline.assign') }}
     b-btn.mt-2(
       v-if="rows.length > visible.length"
       size="sm"
@@ -34,6 +33,29 @@ div
       | {{ $t('activity.categorizeInline.showMore') }}
 
   div.text-danger.small.mt-2(v-if="error") {{ error }}
+
+  b-modal(
+    v-model="picking"
+    :title="$t('activity.categorizeInline.pickTitle', { app: pendingLabel })"
+    ok-only
+    ok-variant="secondary"
+    :ok-title="$t('common.cancel')"
+    @hidden="categorySearch = ''"
+  )
+    b-form-input.mb-2(
+      v-model="categorySearch"
+      size="sm"
+      type="search"
+      :placeholder="$t('activity.categorizeInline.pickPlaceholder')"
+      :aria-label="$t('activity.categorizeInline.pickPlaceholder')"
+    )
+    div.small.text-muted(v-if="categorySearch && pickCategories.length === 0")
+      | {{ $t('activity.categorizeInline.pickNoMatches', { query: categorySearch }) }}
+    b-list-group(flush style="max-height: 50vh; overflow-y: auto")
+      b-list-group-item(button @click="chooseCreate")
+        | {{ $t('activity.categorizeInline.newCategory') }}
+      b-list-group-item(button v-for="c in pickCategories" :key="c.value" @click="choose(c.value)")
+        | {{ c.text }}
 
   b-modal(
     v-model="creating"
@@ -67,9 +89,6 @@ import { seconds_to_duration } from '~/util/time';
 
 const PAGE = 5;
 
-/** The sentinel the select uses for "make a new category from this app name". */
-const CREATE = '__create__';
-
 export default Vue.extend({
   name: 'aw-inline-categorize',
   props: {
@@ -83,6 +102,8 @@ export default Vue.extend({
       search: '',
       busy: false,
       error: '' as string,
+      picking: false,
+      categorySearch: '',
       creating: false,
       pendingLabel: '',
       newCategoryName: '',
@@ -122,20 +143,28 @@ export default Vue.extend({
     visible(): { label: string; seconds: number }[] {
       return this.rows.slice(0, this.shown);
     },
-    categoryOptions(): { value: any; text: string; disabled?: boolean }[] {
-      const cats = this.categoryStore.classes
+    /** Every category that can be assigned to, as `Parent > Child`, alphabetically. */
+    categoryOptions(): { value: any; text: string }[] {
+      return this.categoryStore.classes
         .filter((c: any) => !(c.name.length === 1 && c.name[0] === 'Uncategorized'))
         .map((c: any) => ({ value: c.id, text: c.name.join(' > ') }))
         .sort((a: any, b: any) => (a.text > b.text ? 1 : -1));
-      return [
-        {
-          value: null,
-          text: this.$t('activity.categorizeInline.assign') as string,
-          disabled: true,
-        },
-        { value: CREATE, text: this.$t('activity.categorizeInline.newCategory') as string },
-        ...cats,
-      ];
+    },
+    /**
+     * The categories the picker lists, narrowed by its own search box.
+     *
+     * Matched against the full `Parent > Child` path, so typing a parent finds all of
+     * its children -- a set of categories deep enough to need searching is usually deep
+     * because of nesting, not because of a long flat list.
+     *
+     * Substring, case-insensitive, and not a regex, for the same reason the app search
+     * above it is not: the thing being searched here ends up next to a regex field, and
+     * a box that silently treated `c++` as a pattern would teach the wrong lesson.
+     */
+    pickCategories(): { value: any; text: string }[] {
+      const q = this.categorySearch.trim().toLowerCase();
+      if (!q) return this.categoryOptions;
+      return this.categoryOptions.filter(c => c.text.toLowerCase().includes(q));
     },
   },
   watch: {
@@ -153,15 +182,31 @@ export default Vue.extend({
     literal(label: string): string {
       return label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     },
-    async assign(label: string, choice: any) {
-      if (choice === null || choice === undefined) return;
-      if (choice === CREATE) {
-        this.pendingLabel = label;
-        this.newCategoryName = label;
+    /**
+     * Open the category picker for one app.
+     *
+     * A picker rather than the select this replaced: the select was the browser's own,
+     * which on a phone is a wheel with no way to type, so finding one category among a
+     * few dozen meant scrolling past all of them. Asked for after using it.
+     */
+    openPicker(label: string) {
+      this.pendingLabel = label;
+      this.categorySearch = '';
+      this.picking = true;
+    },
+    async choose(id: any) {
+      if (id === null || id === undefined) return;
+      const label = this.pendingLabel;
+      this.picking = false;
+      await this.commit(() => this.categoryStore.appendClassRule(id, this.literal(label)));
+    },
+    /** Hand the same app off to the new-category modal, one modal at a time. */
+    chooseCreate() {
+      this.newCategoryName = this.pendingLabel;
+      this.picking = false;
+      this.$nextTick(() => {
         this.creating = true;
-        return;
-      }
-      await this.commit(() => this.categoryStore.appendClassRule(choice, this.literal(label)));
+      });
     },
     async createCategory() {
       const name = (this.newCategoryName || this.pendingLabel).trim();

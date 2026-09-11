@@ -314,6 +314,9 @@ export default {
     categorizeInline: {
       searchPlaceholder: 'Sök appar...',
       noMatches: 'Ingen okategoriserad app matchar "{query}".',
+      pickTitle: 'Kategorisera "{app}"',
+      pickPlaceholder: 'Sök kategorier...',
+      pickNoMatches: 'Ingen kategori matchar "{query}".',
       open: 'Kategorisera {count} okategoriserade appar',
       hide: 'Dölj okategoriserade appar',
       assign: 'Tilldela en kategori...',

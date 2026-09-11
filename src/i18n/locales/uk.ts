@@ -307,6 +307,9 @@ export default {
     categorizeInline: {
       searchPlaceholder: 'Пошук застосунків...',
       noMatches: 'Жоден некатегоризований застосунок не відповідає "{query}".',
+      pickTitle: 'Категоризувати "{app}"',
+      pickPlaceholder: 'Пошук категорій...',
+      pickNoMatches: 'Жодна категорія не відповідає "{query}".',
       open: 'Розподілити {count} некатегоризованих застосунків',
       hide: 'Сховати некатегоризовані застосунки',
       assign: 'Призначити категорію...',

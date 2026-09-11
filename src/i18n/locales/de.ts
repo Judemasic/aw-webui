@@ -311,6 +311,9 @@ export default {
     categorizeInline: {
       searchPlaceholder: 'Apps suchen...',
       noMatches: 'Keine nicht kategorisierte App passt zu "{query}".',
+      pickTitle: '"{app}" kategorisieren',
+      pickPlaceholder: 'Kategorien suchen...',
+      pickNoMatches: 'Keine Kategorie passt zu "{query}".',
       open: '{count} nicht kategorisierte Apps einordnen',
       hide: 'Nicht kategorisierte Apps ausblenden',
       assign: 'Kategorie zuweisen...',

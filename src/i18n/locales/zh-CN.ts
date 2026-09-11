@@ -300,6 +300,9 @@ export default {
     categorizeInline: {
       searchPlaceholder: '搜索应用...',
       noMatches: '没有未分类的应用与“{query}”匹配。',
+      pickTitle: '为“{app}”分类',
+      pickPlaceholder: '搜索分类...',
+      pickNoMatches: '没有分类与“{query}”匹配。',
       open: '归类 {count} 个未分类应用',
       hide: '隐藏未分类应用',
       assign: '指定类别...',

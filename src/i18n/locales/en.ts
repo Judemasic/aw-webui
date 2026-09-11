@@ -310,6 +310,9 @@ export default {
     categorizeInline: {
       searchPlaceholder: 'Search apps...',
       noMatches: 'No uncategorised app matches "{query}".',
+      pickTitle: 'Categorise "{app}"',
+      pickPlaceholder: 'Search categories...',
+      pickNoMatches: 'No category matches "{query}".',
       open: 'Categorise {count} uncategorised apps',
       hide: 'Hide uncategorised apps',
       assign: 'Assign a category...',
