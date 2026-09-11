@@ -85,12 +85,151 @@ export interface CombinedSegment {
   background?: { device: string; label: string }[];
 }
 
+/** One thing the owner was reading, editing or timing, and how long it held. */
+export interface CombinedDetailRow {
+  data: Record<string, any>;
+  seconds: number;
+}
+
 export interface CombinedTimelineResponse {
   combined: CombinedSegment[];
   combined_seconds: number;
   /** Everything an exclusion rule or an "I was away" answer said counts toward nothing. */
   excluded_seconds?: number;
   devices?: { device: string; seconds?: number; hostname?: string; is_own?: boolean }[];
+  /**
+   * What was happening *inside* the winning app, from the buckets the combined track never
+   * puts into contention -- browser tabs, editor files, the clock. Keyed by bucket type.
+   *
+   * The server has already intersected each device's events with the stretches of the day that
+   * device actually won, which is the part a per-device page cannot do: a phone's browsing while
+   * the desktop held the foreground is real browsing that is no part of this day, and the
+   * per-device browser panel has always counted it anyway.
+   *
+   * Absent from a server older than this, which is why every reader here tolerates `undefined`
+   * rather than assuming the key.
+   */
+  details?: Record<string, CombinedDetailRow[]>;
+}
+
+/** The bucket types {@link CombinedTimelineResponse.details} is keyed by. */
+const BROWSER_DETAIL = 'web.tab.current';
+const EDITOR_DETAIL = 'app.editor.activity';
+const STOPWATCH_DETAIL = 'general.stopwatch';
+
+/**
+ * Sum detail rows by one field, biggest first -- the shape every "top N" panel expects.
+ *
+ * Grouped here rather than on the server for the reason the server's own comment gives: the same
+ * URL arrives from two devices as two rows and has to be added up somewhere, and which field
+ * matters is a property of the panel, not of the data.
+ *
+ * Rows whose key is missing or empty are dropped, not bucketed under a blank name. A watcher that
+ * did not record a project is not a project called "".
+ */
+function groupDetail(
+  rows: CombinedDetailRow[] | undefined,
+  keyOf: (data: Record<string, any>) => string | undefined,
+  dataOf: (data: Record<string, any>, key: string) => Record<string, any>
+): IEvent[] {
+  const totals = new Map<string, { data: Record<string, any>; seconds: number }>();
+  for (const row of rows || []) {
+    const key = keyOf(row.data || {});
+    if (!key) continue;
+    const existing = totals.get(key);
+    if (existing) {
+      existing.seconds += row.seconds;
+    } else {
+      totals.set(key, { data: dataOf(row.data || {}, key), seconds: row.seconds });
+    }
+  }
+  return Array.from(totals.values())
+    .sort((a, b) => b.seconds - a.seconds)
+    .map(({ data, seconds }) => ({
+      // Empty on purpose. `topBy` can give a row the first block it appeared in; these rows come
+      // from a server that has already summed a whole day's events away, so there is no single
+      // moment to name and inventing one would be a lie a chart could later draw. `aw-summary`,
+      // which is every panel these feed, reads `duration` and `data` and never the timestamp.
+      timestamp: '',
+      duration: seconds,
+      data: { ...data, $duration: seconds },
+    }));
+}
+
+/**
+ * The host part of a URL, or `undefined` for anything that is not one.
+ *
+ * `new URL` throws on a malformed string, and a browser extension will happily record
+ * `about:blank`, a `file://` path or a half-typed address. One bad row must not take the panel
+ * down, so a URL that cannot be parsed simply has no domain and drops out of the domain list
+ * while still counting in the URL list.
+ */
+function domainOf(url: unknown): string | undefined {
+  if (typeof url !== 'string' || !url) return undefined;
+  try {
+    return new URL(url).host || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The browser panels for a combined day, in the shape `query_browser_completed` takes. */
+export function combinedBrowser(res: CombinedTimelineResponse) {
+  const rows = res.details?.[BROWSER_DETAIL] || [];
+  return {
+    domains: groupDetail(
+      rows,
+      d => domainOf(d.url),
+      (_d, $domain) => ({ $domain })
+    ),
+    urls: groupDetail(
+      rows,
+      d => (typeof d.url === 'string' ? d.url : undefined),
+      (d, url) => ({ url, $domain: domainOf(d.url) })
+    ),
+    titles: groupDetail(
+      rows,
+      d => (typeof d.title === 'string' ? d.title : undefined),
+      (d, title) => ({ title, $domain: domainOf(d.url) })
+    ),
+    duration: rows.reduce((a, r) => a + r.seconds, 0),
+  };
+}
+
+/** The editor panels for a combined day, in the shape `query_editor_completed` takes. */
+export function combinedEditor(res: CombinedTimelineResponse) {
+  const rows = res.details?.[EDITOR_DETAIL] || [];
+  return {
+    // `file` and `project` keep `language` alongside them, because both panels colour their rows
+    // by language and a row without one would be drawn in the fallback colour.
+    files: groupDetail(
+      rows,
+      d => (typeof d.file === 'string' ? d.file : undefined),
+      (d, file) => ({ file, language: d.language, project: d.project })
+    ),
+    languages: groupDetail(
+      rows,
+      d => (typeof d.language === 'string' ? d.language : undefined),
+      (_d, language) => ({ language })
+    ),
+    projects: groupDetail(
+      rows,
+      d => (typeof d.project === 'string' ? d.project : undefined),
+      (d, project) => ({ project, language: d.language })
+    ),
+    duration: rows.reduce((a, r) => a + r.seconds, 0),
+  };
+}
+
+/** The clock panel for a combined day, in the shape `query_stopwatch_completed` takes. */
+export function combinedStopwatch(res: CombinedTimelineResponse) {
+  return {
+    stopwatch_events: groupDetail(
+      res.details?.[STOPWATCH_DETAIL],
+      d => (typeof d.label === 'string' ? d.label : undefined),
+      (_d, label) => ({ label })
+    ),
+  };
 }
 
 export interface CombinedActivityResult {
@@ -446,8 +585,20 @@ export function dayBounds(date: string, startOfDay: string): { start: string; en
  * Two different reasons, both permanent-ish rather than unimplemented:
  *
  *  - **A combined segment names one device's activity.** The pipeline decides which *device*
- *    counted for a stretch of time, not which window, so browser domains/URLs and editor files
- *    have no combined answer at all -- they live in buckets the combined track never reads.
+ *    counted for a stretch of time, not which window.
+ *
+ *    Browser domains/URLs and editor files used to be here, on the grounds that they live in
+ *    buckets the combined track never reads. It reads them now. The argument that kept those
+ *    buckets out was always about *contention* -- a browser tab overlaps its own window for the
+ *    same instants, so a tab competing with a window would let a tab title win the track -- and
+ *    it was read as "the combined day cannot answer these at all". The day's own answer is
+ *    better than a per-device page's, in fact: the server intersects each device's browsing with
+ *    the stretches that device actually won, so the phone's browsing during an afternoon the
+ *    desktop held is left out, which a per-device browser panel has never done.
+ *
+ *    The clock came back with them and is masked differently: a stopwatch event is the owner
+ *    starting and stopping a timer, not a measurement of a device, so no other device winning
+ *    the foreground can make ten minutes of it not have happened.
  *
  *    `top_bundle_ids` used to be here too, on the grounds that a segment "carries an app label
  *    and nothing finer". That stopped being true in 4.4i: the response now carries the winning
@@ -468,18 +619,7 @@ export function dayBounds(date: string, startOfDay: string): { start: string; en
  * tab whose every panel would say "(no data)" does not appear at all — three dead tabs is
  * exactly the "too much on the UI" the combined view exists to avoid.
  */
-export const COMBINED_UNAVAILABLE_TYPES = new Set([
-  'top_titles',
-  'top_domains',
-  'top_urls',
-  'top_browser_titles',
-  'top_editor_files',
-  'top_editor_languages',
-  'top_editor_projects',
-  'top_stopwatches',
-  'sunburst_clock',
-  'vis_timeline',
-]);
+export const COMBINED_UNAVAILABLE_TYPES = new Set(['top_titles', 'sunburst_clock', 'vis_timeline']);
 
 /** Whether a view has anything at all to show on the combined day. */
 export function viewHasCombinedContent(view: { elements?: { type: string }[] }): boolean {

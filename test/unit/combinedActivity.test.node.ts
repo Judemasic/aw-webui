@@ -1,7 +1,10 @@
 import {
   COMBINED_HOST,
   COMBINED_UNAVAILABLE_TYPES,
+  combinedBrowser,
   combinedByPeriod,
+  combinedEditor,
+  combinedStopwatch,
   combinedToActivity,
   dayBounds,
   CombinedTimelineResponse,
@@ -226,9 +229,26 @@ describe('combinedByPeriod', () => {
 
   it('no longer marks the barchart unavailable on the combined day', () => {
     expect(COMBINED_UNAVAILABLE_TYPES.has('timeline_barchart')).toBe(false);
-    // The ones that stay unavailable do so for a reason the segments cannot fix.
+    // The ones that stay unavailable do so for a reason the segments cannot fix: both of these
+    // read a host's raw buckets directly, and the combined host owns none.
     expect(COMBINED_UNAVAILABLE_TYPES.has('top_titles')).toBe(true);
     expect(COMBINED_UNAVAILABLE_TYPES.has('sunburst_clock')).toBe(true);
+  });
+
+  it('no longer marks browser, editor and the clock unavailable', () => {
+    // Roadmap 4.10c: these come out of the same response now, masked by the time each device
+    // actually won.
+    for (const type of [
+      'top_domains',
+      'top_urls',
+      'top_browser_titles',
+      'top_editor_files',
+      'top_editor_languages',
+      'top_editor_projects',
+      'top_stopwatches',
+    ]) {
+      expect(COMBINED_UNAVAILABLE_TYPES.has(type)).toBe(false);
+    }
   });
 });
 
@@ -479,5 +499,137 @@ describe('per-window rows on a desktop combined day', () => {
     );
     expect(out.title_events.length).toBe(2);
     expect(out.title_events.map(e => e.data.app)).toEqual(['Code.exe', 'WhatsApp']);
+  });
+});
+
+describe('what was inside the app on the combined day (roadmap 4.10c)', () => {
+  const withDetails = (details: any): CombinedTimelineResponse => ({
+    combined: [],
+    combined_seconds: 0,
+    details,
+  });
+
+  describe('browser', () => {
+    const day = withDetails({
+      'web.tab.current': [
+        { data: { url: 'https://github.com/a', title: 'A' }, seconds: 100 },
+        { data: { url: 'https://github.com/b', title: 'B' }, seconds: 50 },
+        { data: { url: 'https://news.example/x', title: 'X' }, seconds: 200 },
+      ],
+    });
+
+    it('adds URLs up into domains, biggest first', () => {
+      const out = combinedBrowser(day);
+      expect(out.domains.map(e => e.data.$domain)).toEqual(['news.example', 'github.com']);
+      expect(out.domains.map(e => e.duration)).toEqual([200, 150]);
+    });
+
+    it('keeps each URL its own row, and colours it by its domain', () => {
+      const out = combinedBrowser(day);
+      expect(out.urls).toHaveLength(3);
+      expect(out.urls[0].data.url).toBe('https://news.example/x');
+      expect(out.urls[0].data.$domain).toBe('news.example');
+    });
+
+    it('carries $duration, which is what the summary panel reads', () => {
+      expect(combinedBrowser(day).urls[0].data.$duration).toBe(200);
+    });
+
+    it('reports the day total as the sum of what it was given', () => {
+      expect(combinedBrowser(day).duration).toBe(350);
+    });
+
+    it('sums the same page arriving from two devices into one row', () => {
+      const out = combinedBrowser(
+        withDetails({
+          'web.tab.current': [
+            { data: { url: 'https://same/page', title: 'T' }, seconds: 10 },
+            { data: { url: 'https://same/page', title: 'T', $device: 'other' }, seconds: 5 },
+          ],
+        })
+      );
+      expect(out.urls).toHaveLength(1);
+      expect(out.urls[0].duration).toBe(15);
+    });
+
+    it('does not fall over on a URL that is not one', () => {
+      // A browser extension will happily record `about:blank` or a half-typed address, and one
+      // bad row must not take the panel down with it.
+      const out = combinedBrowser(
+        withDetails({
+          'web.tab.current': [
+            { data: { url: 'about:blank', title: 'New tab' }, seconds: 7 },
+            { data: { url: 'not a url at all' }, seconds: 3 },
+            { data: { url: 'https://real.example/p' }, seconds: 5 },
+          ],
+        })
+      );
+      expect(out.domains.map(e => e.data.$domain)).toEqual(['real.example']);
+      // Still counted where it can be: the URL list keeps all three.
+      expect(out.urls).toHaveLength(3);
+    });
+
+    it('is empty, not broken, on a server that does not send details', () => {
+      const out = combinedBrowser({ combined: [], combined_seconds: 0 });
+      expect(out.urls).toEqual([]);
+      expect(out.domains).toEqual([]);
+      expect(out.duration).toBe(0);
+    });
+  });
+
+  describe('editor', () => {
+    const day = withDetails({
+      'app.editor.activity': [
+        { data: { file: 'a.rs', language: 'rust', project: 'aw' }, seconds: 60 },
+        { data: { file: 'b.rs', language: 'rust', project: 'aw' }, seconds: 30 },
+        { data: { file: 'c.ts', language: 'typescript', project: 'webui' }, seconds: 100 },
+      ],
+    });
+
+    it('rolls files up into languages and projects', () => {
+      const out = combinedEditor(day);
+      expect(out.files.map(e => e.data.file)).toEqual(['c.ts', 'a.rs', 'b.rs']);
+      expect(out.languages.map(e => [e.data.language, e.duration])).toEqual([
+        ['typescript', 100],
+        ['rust', 90],
+      ]);
+      expect(out.projects.map(e => e.data.project)).toEqual(['webui', 'aw']);
+    });
+
+    it('keeps the language on a file row, which is what colours it', () => {
+      expect(combinedEditor(day).files[0].data.language).toBe('typescript');
+    });
+
+    it('drops a row whose key the watcher never recorded', () => {
+      // A file with no project is not a project called "".
+      const out = combinedEditor(
+        withDetails({ 'app.editor.activity': [{ data: { file: 'x.rs' }, seconds: 10 }] })
+      );
+      expect(out.files).toHaveLength(1);
+      expect(out.projects).toEqual([]);
+      expect(out.languages).toEqual([]);
+    });
+  });
+
+  describe('the clock', () => {
+    it('adds two runs of the same timer together', () => {
+      const out = combinedStopwatch(
+        withDetails({
+          'general.stopwatch': [
+            { data: { label: 'reading' }, seconds: 300 },
+            { data: { label: 'reading', running: false }, seconds: 120 },
+            { data: { label: 'exercise' }, seconds: 600 },
+          ],
+        })
+      );
+      expect(out.stopwatch_events.map(e => [e.data.label, e.duration])).toEqual([
+        ['exercise', 600],
+        ['reading', 420],
+      ]);
+    });
+
+    it('is empty on a day with no timers', () => {
+      expect(combinedStopwatch({ combined: [], combined_seconds: 0 }).stopwatch_events).toEqual([]);
+    });
   });
 });

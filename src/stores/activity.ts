@@ -30,6 +30,9 @@ import {
 import {
   COMBINED_HOST,
   combinedByPeriod,
+  combinedBrowser,
+  combinedEditor,
+  combinedStopwatch,
   combinedToActivity,
   dayBounds,
   CombinedActivityResult,
@@ -442,7 +445,12 @@ export const useActivityStore = defineStore('activity', {
           await this.query_active_history_completed();
         }
 
-        if (!isCombined && this.editor.available) {
+        if (isCombined) {
+          // Already filled, from the same response query_combined_full fetched. Falling into
+          // the `else` below would call the completion with no argument and wipe the rows that
+          // response carried -- the combined day's editor panel would go empty a moment after
+          // it filled, for no reason a reader of either branch could see.
+        } else if (this.editor.available) {
           await this.query_editor(query_options);
         } else {
           console.log('Cannot call query_editor as we do not have any editor buckets');
@@ -623,6 +631,24 @@ export const useActivityStore = defineStore('activity', {
         duration: built.duration,
       });
       this.combined_completed(built, res.data as CombinedTimelineResponse);
+
+      // What was going on inside the winning app: browser tabs, editor files, the clock
+      // (roadmap 4.10c). Availability is decided by what came back rather than by which buckets
+      // exist, which is the honest answer on a *combined* day: a browser bucket on a device that
+      // never held the foreground today has nothing to say about today, and a panel reading
+      // "no data" would be a claim about the day rather than about the data.
+      const browser = combinedBrowser(res.data as CombinedTimelineResponse);
+      this.browser.available = browser.urls.length > 0;
+      this.query_browser_completed(browser);
+
+      const editor = combinedEditor(res.data as CombinedTimelineResponse);
+      this.editor.available =
+        editor.files.length > 0 || editor.languages.length > 0 || editor.projects.length > 0;
+      this.query_editor_completed(editor);
+
+      const stopwatch = combinedStopwatch(res.data as CombinedTimelineResponse);
+      this.stopwatch.available = stopwatch.stopwatch_events.length > 0;
+      this.query_stopwatch_completed(stopwatch);
 
       // The Timeline barchart's bars, sliced out of the same response rather than
       // fetched again -- see combinedByPeriod (roadmap 4.4g).
@@ -853,12 +879,13 @@ export const useActivityStore = defineStore('activity', {
     },
 
     set_available(this: State, host?: string) {
-      // The combined host owns none of these buckets, because it is not a host. What it
-      // can answer is apps, categories and the day's total; what it cannot answer is
-      // titles, browser, editor and stopwatch, because the combined track carries an app
-      // label and nothing finer. Marking those unavailable is what hides their panels --
-      // showing them empty would read as "you visited no sites", which is a claim about
-      // the day rather than about the data.
+      // The combined host owns none of these buckets, because it is not a host. Apps,
+      // categories and the day's total it answers from the pipeline; browser, editor and the
+      // clock it answers from the same response's `details`, but only once that response has
+      // arrived -- so they start false here and `query_combined_full` turns on whichever of
+      // them the day actually has. Starting them false is what stops a panel appearing empty
+      // between the host changing and the day loading: "you visited no sites" is a claim
+      // about the day rather than about the data.
       if (host === COMBINED_HOST) {
         this.window.available = true;
         this.active.available = true;
