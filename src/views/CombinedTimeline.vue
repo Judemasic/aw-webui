@@ -556,7 +556,9 @@ export default Vue.extend({
       selected: null as any,
       selectedKey: null as string | null,
       /** The segment the resolution sheet is open on, or null. Roadmap 4.1. */
-      resolving: null as Segment | null,
+      // A `Segment`, or a roadmap 4.11 question wearing one's shape: both carry the `start`,
+      // `end` and cast the sheet needs, and only the question carries `competitors`.
+      resolving: null as any,
       /** Roadmap 4.3 — a revoke is in flight; both Undo buttons go dead while it is. */
       undoing: false,
       /** Roadmap 4.6c — a "this counts as nothing" post is in flight. */
@@ -789,6 +791,20 @@ export default Vue.extend({
      */
     resolveParticipants(): any[] {
       if (!this.resolving) return [];
+      // Roadmap 4.11. A question arrives with its cast already worked out: every competitor with
+      // its **own** running time, longest first. `participantsOf` is still the path for a bare
+      // segment — Activity's inline sheet opens on one of those, and a settled block being
+      // changed has no question — but where there is a question, its list wins.
+      const competitors = (this.resolving as any).competitors;
+      if (competitors) {
+        return competitors.map((c: any) => ({
+          device: c.device,
+          label: c.label,
+          minutes: c.seconds / 60,
+          color: this.colorFor(c.label),
+          isForeground: c.is_foreground,
+        }));
+      }
       return participantsOf(this.resolving, (label: string) => this.colorFor(label));
     },
     devices(): DeviceTrack[] {
@@ -819,8 +835,44 @@ export default Vue.extend({
     deviceMinutes(): number {
       return this.shownDevices.reduce((n, d) => n + d.total_seconds / 60, 0);
     },
+    /**
+     * Roadmap 4.11 — the things the owner is actually asked, as the server groups them.
+     *
+     * Each carries its own `start`/`end` (the whole contended run), the seconds an answer will
+     * move, and `competitors` already ordered longest-first with the offered winner leading.
+     * The view never re-sorts that list: two devices holding the same day must offer the same
+     * answers in the same order (**R18**), and the server is the only place that can promise it.
+     */
+    questions(): any[] {
+      return (this.data && (this.data as any).questions) || [];
+    },
+    /**
+     * Block index -> question index, **including the settled slivers a run was drawn across**.
+     *
+     * The server only tags the contended blocks, because only those carry unresolved seconds.
+     * Shading is a different matter: the owner asked for the whole overlap to read as one
+     * shaded stretch, and a run with seven-second holes punched through it reads as several.
+     * Filling the gaps here keeps that purely a drawing decision — nothing about what counts,
+     * or about what an answer settles, comes through this map.
+     */
+    questionOfBlock(): Record<number, number> {
+      const out: Record<number, number> = {};
+      this.questions.forEach((q: any, qi: number) => {
+        const blocks: number[] = q.blocks || [];
+        if (!blocks.length) return;
+        for (let i = blocks[0]; i <= blocks[blocks.length - 1]; i++) out[i] = qi;
+      });
+      return out;
+    },
+    /**
+     * How many questions are left — not how many blocks are shaded.
+     *
+     * Those were the same number until 4.11, and the gap between them is what the owner was
+     * complaining about: one overlap of Emby against ActivityWatch drew as four shaded blocks,
+     * so the counter said four and answering it moved the count by one, four times.
+     */
     contendedCount(): number {
-      return this.segments.filter(s => s.unresolved).length;
+      return this.questions.length;
     },
     selectedSegment(): Segment | null {
       return this.selected && this.selected.kind === 'segment' ? this.selected.seg : null;
@@ -864,11 +916,23 @@ export default Vue.extend({
      */
     stepRows(): any[] {
       if (!this.activeTrack) return [];
-      return this.activeTrack.rows
+      const rows = this.activeTrack.rows
         .filter((r: any) => r.end > this.windowStart && r.start < this.windowEnd)
         .filter((r: any) => !this.view.resolveMode || r.contended)
         .slice()
         .sort((a: any, b: any) => a.start - b.start);
+      if (!this.view.resolveMode) return rows;
+      // Roadmap 4.11. One stop per question. Without this the arrows walk *blocks*, so a single
+      // overlap broken by a seven-second blink costs four presses of Next and three answers that
+      // say the same thing. The first block of each run is the stop, because it is the one whose
+      // start the run starts at.
+      const seen = new Set<number>();
+      return rows.filter((r: any) => {
+        if (r.question === undefined) return true;
+        if (seen.has(r.question)) return false;
+        seen.add(r.question);
+        return true;
+      });
     },
     /** Index of the selection within [stepRows], or -1 when nothing is selected. */
     stepIndex(): number {
@@ -898,12 +962,20 @@ export default Vue.extend({
           id: 'combined',
           label: 'Combined',
           primary: true,
-          rows: this.segments.map(s => {
+          rows: this.segments.map((s, i) => {
             const slices = this.slicesOf(s);
+            const q = this.questionOfBlock[i];
             return {
               start: this.toMinutes(s.start),
               end: this.toMinutes(s.end),
-              contended: s.unresolved,
+              // Which question this block belongs to, or undefined. Used by the stepper to walk
+              // one overlap at a time and by `openResolve` to answer the whole run at once.
+              question: q,
+              // Shaded because it is part of an open question, which is *almost* the same as
+              // `s.unresolved` and differs exactly on the slivers bridged over — see
+              // [questionOfBlock]. A settled second inside an overlap still looks like part of
+              // the overlap, because that is what it was.
+              contended: q !== undefined,
               title: `${this.segmentTitle(s)} · ${this.fmt(s.seconds / 60)}`,
               // Start time is unique within a track and survives a re-fetch, so a
               // selection stays put across a reload or a device being toggled.
@@ -1486,8 +1558,31 @@ export default Vue.extend({
       this.step(e.key === 'ArrowRight' ? 1 : -1);
     },
 
+    /**
+     * Roadmap 4.11 — answer the *overlap*, not the block that happened to be tapped.
+     *
+     * The sheet needs only a window and a cast, so a question is handed to it in a segment's
+     * shape. Two things change for the owner: the header reads the whole run's time rather than
+     * one slice of it, and the decision's window covers the run, so one answer settles all of it.
+     *
+     * That window is wider than the time the answer may credit, and deliberately so. ④ settles
+     * only the sub-segments where the picked activity was actually running (4.2a, **R11**), so
+     * the settled slivers the run was drawn across are spanned, not swallowed — nobody is paid
+     * for seconds no watcher recorded.
+     *
+     * Falls back to the block when there is no question: a settled block opened to change an
+     * answer already given has no run to belong to.
+     */
     openResolve() {
-      this.resolving = this.selectedSegment;
+      this.resolving = this.questionFor(this.selectedSegment) || this.selectedSegment;
+    },
+    /** The question a block belongs to, or null. */
+    questionFor(seg: Segment | null): any {
+      if (!seg) return null;
+      const i = this.segments.indexOf(seg);
+      if (i < 0) return null;
+      const qi = this.questionOfBlock[i];
+      return qi === undefined ? null : this.questions[qi];
     },
     /**
      * Roadmap 4.2 — store the record and show the day it produces.
