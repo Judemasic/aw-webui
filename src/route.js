@@ -82,7 +82,7 @@ const router = new VueRouter({
     // The matcher excludes 'category-builder' so the more specific route above
     // wins; new groups added in Settings.vue should also be added here.
     {
-      path: '/settings/:group(general|appearance|categorization|notifications|privacy|developer|device)',
+      path: '/settings/:group(general|appearance|categorization|sync|notifications|privacy|developer|device)',
       component: Settings,
       props: true,
     },
