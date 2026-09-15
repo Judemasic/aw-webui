@@ -12,7 +12,7 @@ div
 
   b-alert(v-if="error" show variant="danger") {{ error }}
 
-  b-alert(v-if="status && !status.can_sync" show variant="warning")
+  b-alert(v-if="status && !native && !status.can_sync" show variant="warning")
     b aw-sync is not installed next to this server.
     div.small This build cannot sync on its own. Reinstall ActivityWatch to get the whole suite.
 
@@ -61,13 +61,29 @@ div
       | Every device that syncs writes its own database into this folder and reads the others'.
       | It has to be a folder your sync program can reach — not a hidden application directory.
 
-    b-form(@submit.prevent="saveDir")
+    //- Roadmap 4.13. On Android the folder is not a path anybody can type: it is a grant the
+    //- system's own picker hands out, and only the app can ask for one. Same screen, same steps,
+    //- and the one genuinely platform-shaped part is asked of the platform.
+    div(v-if="native")
+      div.d-flex.flex-wrap.align-items-center
+        div.mr-auto
+          div(v-if="status.has_dir")
+            b Folder:
+            |  {{ status.sync_dir_name || 'chosen' }}
+          div.text-warning(v-else) No folder chosen yet.
+        b-btn(variant="primary" :disabled="busy" @click="chooseFolder")
+          | {{ status.has_dir ? 'Change folder' : 'Choose folder' }}
+      div.small.text-muted.mt-2
+        | Pick the folder Syncthing keeps in step — on most phones that is
+        | #[code ActivityWatch-sync] under your internal storage.
+
+    b-form(v-else @submit.prevent="saveDir")
       b-input-group
         b-form-input(v-model="dirInput" :disabled="busy" placeholder="Full path to the folder")
         b-input-group-append
           b-btn(type="submit" variant="primary" :disabled="busy || dirInput === status.sync_dir")
             | Save
-      div.d-flex.flex-wrap.align-items-center.mt-2
+      div.d-flex.flex-wrap.align-items-center.mt-2(v-if="!native")
         span.small.mr-auto(:class="status.sync_dir_exists ? 'text-success' : 'text-warning'")
           icon.mr-1(:name="status.sync_dir_exists ? 'check' : 'exclamation-triangle'")
           span(v-if="status.sync_dir_exists") The folder exists.
@@ -78,7 +94,7 @@ div
           @click="dirInput = status.default_sync_dir")
           | Use the default
 
-    b-alert.small.mt-3.mb-0(show variant="warning" v-if="status.enabled")
+    b-alert.small.mt-3.mb-0(show variant="warning" v-if="status.enabled && status.sync_dir")
       b Careful changing this while sync is on.
       |  If your sync program is already watching the old folder, moving to a new one leaves the
       | other devices writing somewhere this computer no longer reads — and sync will look like it
@@ -98,7 +114,7 @@ div
       icon.ml-1(name="external-link-alt")
 
     b-list-group.small
-      b-list-group-item
+      b-list-group-item(v-if="!native")
         b On this computer
         div.mt-1 Add a folder in Syncthing with this path:
         div.mt-1
@@ -123,7 +139,10 @@ div
           | it wherever it likes.
 
   //- ---------------------------------------------------------------- step 3: devices
-  b-card(v-if="status")
+  //- Not on Android: reading every device's file out of the folder means opening the SAF tree,
+  //- which the server there cannot do. Saying nothing beats an empty table that reads as
+  //- "no other devices are syncing".
+  b-card(v-if="status && !native")
     div.d-flex.align-items-center.mb-2
       h5.mb-0.mr-auto 3. Devices in the folder
       b-btn(size="sm" variant="outline-secondary" :disabled="busy" @click="load") Refresh
@@ -172,6 +191,8 @@ export default {
   data() {
     return {
       status: null as any,
+      /** Roadmap 4.13 — true in the Android app, where sync is the app's and not the server's. */
+      native: false,
       dirInput: '',
       error: null as string | null,
       busy: false,
@@ -205,9 +226,14 @@ export default {
     },
   },
   mounted() {
+    // The bridge is only there inside the app. Everywhere else this is the desktop screen it
+    // has always been, talking to `/api/0/sync`.
+    this.native = !!(window as any).Android?.hasNativeSync?.();
+    if (this.native) window.addEventListener('aw-sync-folder-chosen', this.onFolderChosen as any);
     this.load();
   },
   beforeDestroy() {
+    window.removeEventListener('aw-sync-folder-chosen', this.onFolderChosen as any);
     // A timer that outlives the page would keep requesting forever, on a page nobody is looking
     // at -- and in the Settings panel this component is mounted and unmounted as groups change.
     this.stopPolling();
@@ -217,18 +243,51 @@ export default {
       this.busy = true;
       this.error = null;
       try {
-        const res = await getClient().req.get('/0/sync');
-        this.apply(res.data);
+        if (this.native) {
+          this.apply(JSON.parse((window as any).Android.nativeSyncStatus()));
+        } else {
+          const res = await getClient().req.get('/0/sync');
+          this.apply(res.data);
+        }
       } catch (e: any) {
         this.error = this.messageOf(e, 'Could not read the sync settings.');
       } finally {
         this.busy = false;
       }
     },
+
+    /** Roadmap 4.13 — hand the folder question to the system picker. */
+    chooseFolder() {
+      this.error = null;
+      try {
+        (window as any).Android.chooseNativeSyncFolder();
+      } catch (e: any) {
+        this.error = this.messageOf(e, 'Could not open the folder picker.');
+      }
+    },
+
+    /**
+     * The picker is another screen, so its answer arrives as an event long after the call that
+     * opened it returned. A cancel reports no error and changes nothing.
+     */
+    onFolderChosen(e: any) {
+      const problem = e?.detail?.error;
+      if (problem) this.error = problem;
+      this.load();
+    },
     async saveDir() {
       await this.post({ dir: this.dirInput }, 'Could not save the folder.');
     },
     async setEnabled(enabled: boolean) {
+      if (this.native) {
+        try {
+          (window as any).Android.setNativeSyncEnabled(enabled);
+        } catch (e: any) {
+          this.error = this.messageOf(e, 'Could not change the sync setting.');
+        }
+        this.load();
+        return;
+      }
       await this.post({ enabled }, 'Could not change the sync setting.');
     },
     async post(body: any, fallback: string) {
@@ -254,6 +313,20 @@ export default {
     async syncNow() {
       this.busy = true;
       this.error = null;
+      if (this.native) {
+        try {
+          // An empty string means it started; anything else is the reason it did not, which is a
+          // sentence for the owner rather than a thrown error ("choose a folder first").
+          const problem = (window as any).Android.runNativeSync();
+          if (problem) this.error = problem;
+        } catch (e: any) {
+          this.error = this.messageOf(e, 'Could not start a sync.');
+        } finally {
+          this.busy = false;
+        }
+        this.load();
+        return;
+      }
       try {
         const res = await getClient().req.post('/0/sync/run');
         this.apply(res.data);
@@ -267,6 +340,9 @@ export default {
     /** Take a status response, and start or stop watching depending on what it says. */
     apply(data: any) {
       this.status = data;
+      // The native side has no aw-sync binary to be missing, and no typed path: it answers with
+      // the fields that mean the same thing on both and leaves the rest out.
+      if (this.native) this.status.can_sync = true;
       // Not while the owner is mid-edit: a poll landing between two keystrokes would put the
       // stored path back under their cursor.
       if (!this.busy || this.dirInput === '') this.dirInput = data.sync_dir;
@@ -299,7 +375,7 @@ export default {
     messageOf(e: any, fallback: string): string {
       return e?.response?.data?.message || e?.message || fallback;
     },
-    friendlyTime(ts: string): string {
+    friendlyTime(ts: string | number): string {
       return moment(ts).fromNow();
     },
     humanSize(bytes: number): string {

@@ -131,6 +131,10 @@ export default {
       // Sync belongs here as well as at /sync. Somebody who has just installed the exe and
       // wants their phone's categories goes to Settings and looks for it; a top-level nav item
       // alone assumes they already know it exists.
+      //
+      // Roadmap 4.13: on Android too, now. It used to be left out because the app had a native
+      // sync screen of its own and "two sync screens on one device would be two owners" -- which
+      // was right, and was settled by deleting the native one rather than by hiding this.
       const sync: Group = {
         id: 'sync',
         label: 'Sync',
@@ -166,13 +170,11 @@ export default {
         components: [{ name: 'DeviceSettings' }],
       };
 
-      // Not on Android: the app has its own sync screen, and its folder is chosen with a file
-      // picker rather than typed. Two sync screens on one device would be two owners.
       const groups = [
         general,
         appearance,
         categorization,
-        ...(this.$isAndroid ? [] : [sync]),
+        sync,
         notifications,
         privacy,
         developer,
