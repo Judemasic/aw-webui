@@ -239,16 +239,24 @@ export default {
     this.stopPolling();
   },
   methods: {
+    /**
+     * The current status, from whichever side owns sync here.
+     *
+     * One function, because **every** reader has to use the same one. The first version of this
+     * branched in `load` alone and left the poll fetching `/0/sync` directly -- which the app's
+     * server does not serve, so on a phone the poll failed silently every two seconds, the status
+     * never came back, and "Syncing..." span forever on a sync that had already finished.
+     */
+    async fetchStatus(): Promise<any> {
+      if (this.native) return JSON.parse((window as any).Android.nativeSyncStatus());
+      const res = await getClient().req.get('/0/sync');
+      return res.data;
+    },
     async load() {
       this.busy = true;
       this.error = null;
       try {
-        if (this.native) {
-          this.apply(JSON.parse((window as any).Android.nativeSyncStatus()));
-        } else {
-          const res = await getClient().req.get('/0/sync');
-          this.apply(res.data);
-        }
+        this.apply(await this.fetchStatus());
       } catch (e: any) {
         this.error = this.messageOf(e, 'Could not read the sync settings.');
       } finally {
@@ -357,8 +365,7 @@ export default {
       // that a pass reading three devices' databases is not also answering a request every tick.
       this.pollTimer = setInterval(async () => {
         try {
-          const res = await getClient().req.get('/0/sync');
-          this.apply(res.data);
+          this.apply(await this.fetchStatus());
         } catch {
           // A failed poll is not worth a banner: the next one is two seconds away, and the pass
           // it is watching is still running regardless of whether we could ask about it.
