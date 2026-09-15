@@ -633,3 +633,48 @@ describe('what was inside the app on the combined day (roadmap 4.10c)', () => {
     });
   });
 });
+
+describe('a stretch the owner put in another category (roadmap 4.14)', () => {
+  const hour = '2026-09-10T09:00:00Z/2026-09-10T10:00:00Z';
+
+  it('counts toward the chosen category, not the one its app is in', () => {
+    const out = combinedToActivity(
+      res([
+        seg({ label: 'Slack', seconds: 300, category: ['Work'], category_by: 'c_1' }),
+        seg({ label: 'Slack', seconds: 200 }),
+      ]),
+      classes
+    );
+    const byName = Object.fromEntries(
+      out.cat_events.map(e => [e.data.$category.join('>'), e.duration])
+    );
+    expect(byName).toEqual({ Work: 300, Comms: 200 });
+  });
+
+  it('may name a category that has no rule at all', () => {
+    const out = combinedToActivity(res([seg({ category: ['Study'] })]), classes);
+    expect(out.cat_events[0].data.$category).toEqual(['Study']);
+  });
+
+  it('still only renames the category, not the app', () => {
+    const out = combinedToActivity(res([seg({ label: 'Slack', category: ['Work'] })]), classes);
+    expect(out.app_events[0].data.app).toBe('Slack');
+  });
+
+  it('falls back to the app when the category is null or empty', () => {
+    const out = combinedToActivity(
+      res([seg({ label: 'Slack', category: null }), seg({ label: 'Slack', category: [] })]),
+      classes
+    );
+    expect(out.cat_events.map(e => e.data.$category)).toEqual([['Comms']]);
+  });
+
+  it('puts the chosen category in the hourly bars too', () => {
+    const out = combinedByPeriod(
+      res([seg({ label: 'Slack', seconds: 600, category: ['Study'] })]),
+      [hour],
+      classes
+    );
+    expect(out[hour].cat_events.map(e => e.data.$category)).toEqual([['Study']]);
+  });
+});

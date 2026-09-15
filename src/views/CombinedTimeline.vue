@@ -261,6 +261,10 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
             p.when.mb-1 {{ clock(selectedSegment.start) }} – {{ clock(selectedSegment.end) }} · {{ fmtDuration(selectedSegment.seconds) }}
             b-badge(:variant="segmentBadge(selectedSegment).variant")
               | {{ segmentBadge(selectedSegment).text }}
+            //- Roadmap 4.14. Said next to the status rather than folded into it: a block can be
+            //- both "Resolved" and "Counts as Study", and those are two different things to know.
+            b-badge.ml-1(v-if="selectedSegment.category" variant="info")
+              | Counts as {{ categoryText(selectedSegment.category) }}
           b-button.close-x(v-if="compact" size="sm" variant="outline-secondary" @click="clearSelection") ✕
 
         //- Peek row: the primary action, always visible without expanding anything.
@@ -296,6 +300,23 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
           ) {{ marking ? 'Saving…' : "Doesn't count" }}
           b-button.act(variant="outline-secondary" @click="detailOpen = !detailOpen")
             | {{ detailOpen ? 'Less' : 'Details' }}
+        //- Roadmap 4.14 — "YouTube is Video, but this hour of it was study". A native select on
+        //- purpose: in the Android WebView it opens the system's own list, which is one tap to
+        //- open and one to choose, and needs no sheet of our own. Its own row, because the row
+        //- above already holds four buttons at half a phone's width.
+        div.count-as.mt-2(v-if="compact && canCountAs(selectedSegment)")
+          b-form-select.count-as-select(
+            :value="null"
+            :options="countAsOptions(selectedSegment)"
+            :disabled="countingAs"
+            @change="countAs(selectedSegment, $event)"
+          )
+          b-button.act(
+            v-if="selectedSegment.category_by"
+            variant="outline-danger"
+            :disabled="undoing"
+            @click="undoCategory(selectedSegment)"
+          ) {{ undoing ? 'Undoing…' : 'Undo category' }}
 
         div.detail-body(v-show="!compact || detailOpen")
           dl.dl.mt-3
@@ -386,6 +407,29 @@ div.combined-view(:class="{ compact }" :style="rootStyle")
               |  ⚙ ▸ Settings ▸ Categorization.
             b-button(size="sm" variant="outline-danger" :disabled="marking" @click="markNotCounted(selectedSegment)")
               | {{ marking ? 'Saving…' : "Doesn't count" }}
+          //- Roadmap 4.14 — the same offer on a wide screen.
+          div.resolve.mt-2(v-if="canCountAs(selectedSegment) && !compact")
+            b Count toward another category
+            div.small.mb-2
+              | This stretch counts as #[b {{ categoryText(currentCategory(selectedSegment)) }}]
+              |  {{ selectedSegment.category ? 'because you chose it' : 'because of its app' }}.
+              |  Choosing another changes only this stretch — the app keeps its category everywhere
+              |  else, and #[b Undo category] puts it back.
+            div.count-as
+              b-form-select.count-as-select(
+                size="sm"
+                :value="null"
+                :options="countAsOptions(selectedSegment)"
+                :disabled="countingAs"
+                @change="countAs(selectedSegment, $event)"
+              )
+              b-button(
+                v-if="selectedSegment.category_by"
+                size="sm"
+                variant="outline-danger"
+                :disabled="undoing"
+                @click="undoCategory(selectedSegment)"
+              ) {{ undoing ? 'Undoing…' : 'Undo category' }}
 
       div(v-else-if="selectedEvent")
         div.d-flex.align-items-start
@@ -444,7 +488,8 @@ import { get_day_start_with_offset, get_today_with_offset } from '~/util/time';
 import { getClient } from '~/util/awclient';
 import { getCategoryColorForLabel } from '~/util/color';
 import { screenRowName } from '~/util/screenNames';
-import { notCountedByCategory } from '~/util/combinedActivity';
+import { categoryOfSegment, notCountedByCategory } from '~/util/combinedActivity';
+import { matchString } from '~/util/classes';
 import { ulid } from '~/util/ulid';
 import ProportionalTimeline from '~/visualizations/ProportionalTimeline.vue';
 import ResolutionSheet from '~/visualizations/ResolutionSheet.vue';
@@ -509,6 +554,10 @@ interface Segment {
   bridged_seconds?: number;
   /** Roadmap 4.5d — seconds drawn inside this block that count toward nothing. */
   uncounted_seconds?: number;
+  /** Roadmap 4.14 — the category the owner put this stretch in, or null for "whatever its app is". */
+  category?: string[] | null;
+  /** Roadmap 4.14 — the decision that did, so undo can revoke exactly it. */
+  category_by?: string | null;
 }
 interface DeviceEvent {
   start: string;
@@ -563,6 +612,8 @@ export default Vue.extend({
       undoing: false,
       /** Roadmap 4.6c — a "this counts as nothing" post is in flight. */
       marking: false,
+      /** Roadmap 4.14 — a "count this as another category" post is in flight. */
+      countingAs: false,
       viewport: { start: 0, end: 24 * 60 },
       windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1024,
       /** Roadmap 4.1b. The ⚙ sheet holding the two fold-outs, on a compact screen. */
@@ -983,7 +1034,12 @@ export default Vue.extend({
               ref: { kind: 'segment', seg: s },
               bands: slices.map(sl => ({
                 label: sl.label,
-                color: this.colorFor(sl.label),
+                // Roadmap 4.14: the stretch is drawn in the category the owner put it in. Only the
+                // band that counts — the others are still what they were.
+                color:
+                  sl.isForeground && s.category
+                    ? this.categoryStore.get_category_color(s.category)
+                    : this.colorFor(sl.label),
                 primary: sl.isForeground,
                 sub: this.shortNameOf(sl.device),
               })),
@@ -1410,6 +1466,124 @@ export default Vue.extend({
       await this.reload();
       this.restoreSelection(key);
     },
+    /**
+     * Roadmap 4.14 — whether to offer *"count this as another category"*. Any block that still
+     * counts toward something; time that counts toward nothing has no category to be in.
+     */
+    canCountAs(s: Segment): boolean {
+      return !s.ignored && !s.not_counted;
+    },
+    categoryText(path: string[] | null | undefined): string {
+      return (path || ['Uncategorized']).join(' > ');
+    },
+    /** What this block counts toward right now — the same answer the Activity charts give. */
+    currentCategory(s: Segment): string[] {
+      return categoryOfSegment(s, label => {
+        const hit = matchString(
+          label || '',
+          this.categoryStore.classes,
+          undefined,
+          this.categoryStore.category_pins
+        );
+        return hit ? hit.name : ['Uncategorized'];
+      });
+    },
+    /**
+     * The categories a stretch may be put in: every one the owner has, bar the ones set never to
+     * count (4.6a) — putting time in one of those would be "Doesn't count" by a second route, and
+     * the panel listing exclusions would not know about it. The one it is already in is left out.
+     */
+    countAsOptions(s: Segment): { value: string | null; text: string; disabled?: boolean }[] {
+      const excluded = (this.categoryStore.not_counted_categories || []).map(n =>
+        JSON.stringify(n)
+      );
+      const current = JSON.stringify(this.currentCategory(s));
+      const names = (this.categoryStore.classes || [])
+        .map((c: any) => c.name as string[])
+        .filter(n => !excluded.includes(JSON.stringify(n)) && JSON.stringify(n) !== current)
+        .map(n => ({ value: JSON.stringify(n), text: n.join(' > ') }))
+        .sort((a, b) => a.text.localeCompare(b.text));
+      return [
+        {
+          value: null,
+          text: s.category ? 'Change category…' : 'Count as another category…',
+          disabled: true,
+        },
+        ...names,
+      ];
+    },
+    /**
+     * Roadmap 4.14 — write an `outcome: category` decision covering exactly this block.
+     *
+     * `scope: once` for the reason 4.6c gives: the owner wants *this* hour of YouTube in Study,
+     * and a standing rule for an app is already what Categorization is for. The server applies it
+     * on top of whatever settled the block, so it neither answers an overlap nor undoes an answer.
+     */
+    async countAs(segment: Segment, value: string | null) {
+      if (!value || this.countingAs || !this.canCountAs(segment)) return;
+      let category: string[];
+      try {
+        category = JSON.parse(value);
+      } catch {
+        return;
+      }
+      const key = this.selectedKey;
+      this.countingAs = true;
+      try {
+        await getClient().req.post('/0/combined/decisions', {
+          id: ulid('d_'),
+          type: 'decision',
+          created_at: new Date().toISOString(),
+          created_by: this.ownDevice,
+          window: { start: segment.start, end: segment.end },
+          signature: {
+            participants: this.slicesOf(segment).map(sl => ({
+              device_role: this.deviceRole(sl.device),
+              device_uuid: sl.device,
+              app: sl.label,
+              category: null,
+            })),
+          },
+          resolution: {
+            outcome: 'category',
+            foreground: null,
+            label: null,
+            category,
+            deliberate_background: [],
+          },
+          scope: 'once',
+        });
+      } catch (e: any) {
+        this.error = e?.response?.data?.message || e?.message || 'Could not save that.';
+        return;
+      } finally {
+        this.countingAs = false;
+      }
+      await this.reload();
+      this.restoreSelection(key);
+    },
+    /** Roadmap 4.14 — revoke this block's category decision, the way 4.3 undoes an answer. */
+    async undoCategory(segment: Segment) {
+      if (!segment.category_by || this.undoing) return;
+      const key = this.selectedKey;
+      this.undoing = true;
+      try {
+        await getClient().req.post('/0/combined/decisions', {
+          id: ulid('t_'),
+          type: 'tombstone',
+          created_at: new Date().toISOString(),
+          created_by: this.ownDevice,
+          revokes: segment.category_by,
+        });
+      } catch (e: any) {
+        this.error = e?.response?.data?.message || e?.message || 'Could not undo that.';
+        return;
+      } finally {
+        this.undoing = false;
+      }
+      await this.reload();
+      this.restoreSelection(key);
+    },
     /** One line naming what the decision did, for the detail panel. */
     resolvedSummary(s: Segment): string {
       // A rule and an answer both stop time counting, and saying "you were away" about a rule
@@ -1682,7 +1856,10 @@ export default Vue.extend({
         left: `${(a / (24 * 60)) * 100}%`,
         width: `${Math.max(0.25, ((b - a) / (24 * 60)) * 100)}%`,
       };
-      if (!s.unresolved) style.background = this.colorFor(s.label);
+      if (!s.unresolved)
+        style.background = s.category
+          ? this.categoryStore.get_category_color(s.category)
+          : this.colorFor(s.label);
       return style;
     },
     /**
@@ -2249,6 +2426,16 @@ details.tools {
     }
     // Resolving is a primary job on this screen now, so the action row is thumb-sized
     // rather than the sm buttons the wide panel uses.
+    // Thumb-sized on a phone; the layout itself is the top-level `.count-as` rule.
+    .count-as {
+      .count-as-select {
+        min-height: 44px;
+      }
+      .act {
+        flex: 0 0 auto;
+        min-height: 44px;
+      }
+    }
     .peek-actions {
       display: flex;
       gap: 8px;
@@ -2365,6 +2552,16 @@ details.tools {
   border-radius: 5px;
   padding: 8px;
   font-size: 12px;
+}
+/* Roadmap 4.14 — the category picker and its undo, side by side. */
+.count-as {
+  display: flex;
+  gap: 8px;
+
+  .count-as-select {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 }
 </style>
 

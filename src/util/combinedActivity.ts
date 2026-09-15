@@ -83,6 +83,13 @@ export interface CombinedSegment {
   not_counted?: boolean;
   /** The other activities that were running in this window (the losers of the pick). */
   background?: { device: string; label: string }[];
+  /**
+   * Roadmap 4.14 — the category the owner said this stretch counts toward, in place of whatever
+   * its app is categorised as. Null (or absent, from an older server) when untouched.
+   */
+  category?: string[] | null;
+  /** The decision that set {@link category}, which is what undoing it revokes. */
+  category_by?: string | null;
 }
 
 /** One thing the owner was reading, editing or timing, and how long it held. */
@@ -301,6 +308,21 @@ function categoryMatcher(classes: Category[], pins?: CategoryPin[]): (label: str
 }
 
 /**
+ * The category a block counts toward: the owner's choice where they made one (roadmap 4.14),
+ * otherwise whatever its app is categorised as.
+ *
+ * Every total that splits a combined day by category has to ask this and not the matcher
+ * directly, or a stretch the owner put in Study would be in Study on the timeline and still in
+ * Video on the chart beside it.
+ */
+export function categoryOfSegment(
+  s: Pick<CombinedSegment, 'label' | 'category'>,
+  byLabel: (label: string) => string[]
+): string[] {
+  return s.category && s.category.length ? s.category : byLabel(s.label);
+}
+
+/**
  * Rows for "what, inside the app" — `(app, classname)` on Android, `(app, title)` on a desktop —
  * with exact seconds, summed over every block's {@link CombinedSegment.shares}.
  *
@@ -449,7 +471,7 @@ export function combinedToActivity(
 
   const cat_events = topBy(
     counted,
-    s => categoryOf(s.label),
+    s => categoryOfSegment(s, categoryOf),
     ($category, seconds) => ({ $category, $duration: seconds })
   );
 
@@ -532,7 +554,7 @@ export function combinedByPeriod(
     const segEnd = Date.parse(s.end);
     const span = segEnd - segStart;
     if (!(span > 0) || !(s.seconds > 0)) continue;
-    const name = categoryOf(s.label);
+    const name = categoryOfSegment(s, categoryOf);
     const id = JSON.stringify(name);
 
     for (let i = 0; i < bounds.length; i++) {
